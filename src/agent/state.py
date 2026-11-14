@@ -99,7 +99,13 @@ class AgentRunResult:
     status: Literal["completed", "abstained", "failed"] = "completed"
     structural_changes: list[dict[str, Any]] = field(default_factory=list)
     calculations: list[dict[str, Any]] = field(default_factory=list)
-    retrieval_diagnostics: list[dict[str, Any]] = field(default_factory=list)
+    diagnostics: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def retrieval_diagnostics(self) -> list[dict[str, Any]]:
+        """Устаревший alias на ``diagnostics['retrieval_calls']``."""
+        value = self.diagnostics.get("retrieval_calls", [])
+        return list(value) if isinstance(value, list) else []
 
 
 class AgentState(TypedDict, total=False):

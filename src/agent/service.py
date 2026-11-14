@@ -10,7 +10,7 @@ import time
 import uuid
 import inspect
 import re
-from dataclasses import replace
+from dataclasses import asdict, is_dataclass, replace
 from queue import Queue
 from threading import Lock, Thread
 from collections.abc import Iterator, Mapping
@@ -280,11 +280,48 @@ class AgentService:
                 status = "abstained" if answer.status == "abstain" else "completed"
                 timings = dict(state.get("timings", {}))
                 timings["total_ms"] = (time.perf_counter() - started) * 1000
+                tool_events = list(state.get("tool_events", []))
+                plan = state.get("query_plan")
+                diagnostics = {
+                    "query_plan": (
+                        asdict(plan)
+                        if is_dataclass(plan)
+                        else plan if isinstance(plan, Mapping) else None
+                    ),
+                    "search_attempts": list(
+                        state.get("search_attempts", [])
+                    ),
+                    "retrieval_calls": [
+                        event.diagnostics
+                        for event in tool_events
+                        if event.diagnostics
+                    ],
+                    "evidence_manifest": sorted(
+                        state.get("evidence_manifest", set())
+                    ),
+                    "context_chunk_ids": None,
+                    "context_source": "evidence_manifest",
+                    "coverage": {
+                        "expected_years": list(
+                            state.get("expected_years", [])
+                        ),
+                        "covered_years": list(
+                            state.get("covered_years", [])
+                        ),
+                        "missing_years": list(
+                            state.get("missing_years", [])
+                        ),
+                    },
+                    "verification": None,
+                    "structural_changes": list(
+                        state.get("structural_changes", [])
+                    ),
+                }
                 result = AgentRunResult(
                     request_id=request_id,
                     conversation_id=conversation_id,
                     answer=answer,
-                    tool_events=list(state.get("tool_events", [])),
+                    tool_events=tool_events,
                     effective_filters=state.get(
                         "effective_filters", filters or SearchFilters()
                     ),
@@ -295,11 +332,7 @@ class AgentService:
                         state.get("structural_changes", [])
                     ),
                     calculations=list(answer.calculations),
-                    retrieval_diagnostics=[
-                        event.diagnostics
-                        for event in state.get("tool_events", [])
-                        if event.diagnostics
-                    ],
+                    diagnostics=diagnostics,
                 )
             except Exception:
                 # Не допускаем утечки текста исключений, traceback и тел ответов.
