@@ -62,6 +62,8 @@ class Answer:
     citations: list[Citation] = field(default_factory=list)
     facts: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    #: Детерминированные расчёты по ``facts``; не являются фактами из отчёта.
+    calculations: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,7 @@ class ToolEvent:
     result_count: int = 0
     duration_ms: float = 0.0
     warning: str | None = None
+    diagnostics: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -94,6 +97,9 @@ class AgentRunResult:
     warnings: list[str]
     timings: dict[str, float]
     status: Literal["completed", "abstained", "failed"] = "completed"
+    structural_changes: list[dict[str, Any]] = field(default_factory=list)
+    calculations: list[dict[str, Any]] = field(default_factory=list)
+    retrieval_diagnostics: list[dict[str, Any]] = field(default_factory=list)
 
 
 class AgentState(TypedDict, total=False):
@@ -122,3 +128,18 @@ class AgentState(TypedDict, total=False):
     timings: dict[str, float]
     unknown_action_fallback_used: bool
     messages: list[Any]
+    #: Полнота собранных доказательств по периодам.
+    expected_years: list[int]
+    covered_years: list[int]
+    missing_years: list[int]
+    rewritten_queries: list[str]
+    search_attempts: list[dict[str, Any]]
+    available_documents: dict[int, list[str]]
+    #: Temporal Structure Analysis: деревья разделов и найденные изменения.
+    structure_documents: dict[int, str]
+    structure_snapshots: dict[int, list[dict[str, Any]]]
+    section_matches: list[dict[str, Any]]
+    structural_changes: list[dict[str, Any]]
+    content_changes: list[dict[str, Any]]
+    structure_comparison_complete: bool
+    structure_content_checked: bool

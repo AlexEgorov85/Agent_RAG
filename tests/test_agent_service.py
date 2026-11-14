@@ -69,6 +69,36 @@ def test_simple_factoid_search_and_answer():
     assert len(search.calls) == 1
 
 
+def test_tools_forward_top_k_and_retrieval_mode_to_backend():
+    class RetrieveBackend:
+        def __init__(self):
+            self.kwargs = None
+
+        def retrieve(self, query, *, filters, top_k, retrieval_mode):
+            self.kwargs = {
+                "query": query,
+                "filters": filters,
+                "top_k": top_k,
+                "retrieval_mode": retrieval_mode,
+            }
+            return {"hits": []}
+
+    backend = RetrieveBackend()
+    tools = AgentTools(search_backend=backend, top_k=3)
+    tools.invoke(
+        "search_reports",
+        {
+            "query": "q",
+            "filters": SearchFilters(),
+            "top_k": 10,
+            "retrieval_mode": "keyword",
+        },
+    )
+
+    assert backend.kwargs["top_k"] == 3
+    assert backend.kwargs["retrieval_mode"] == "keyword"
+
+
 def test_router_plan_adds_year_and_section_filters():
     search = FakeSearch()
 
@@ -247,12 +277,12 @@ def test_tool_budgets_stop_loops():
         action_selector=selector,
     )
     result = service_instance.ask("structure?", conversation_id="budget")
-    assert len(result.tool_events) == 4
+    assert len(result.tool_events) == 8
     assert "tool_budget_exhausted" in result.warnings
     assert result.answer.status == "abstain"
 
 
-def test_search_budget_is_two_calls():
+def test_search_budget_is_five_calls():
     search = FakeSearch()
     selector = SequenceSelector(
         [
@@ -265,8 +295,8 @@ def test_search_budget_is_two_calls():
         answerer=AnswerFromEvidence(),
         action_selector=selector,
     ).ask("query", conversation_id="search-budget")
-    assert len(search.calls) == 2
-    assert len(result.tool_events) == 2
+    assert len(search.calls) == 5
+    assert len(result.tool_events) == 5
     assert "tool_budget_exhausted" in result.warnings
 
 

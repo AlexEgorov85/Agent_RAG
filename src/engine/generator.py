@@ -38,6 +38,13 @@ SAFE_WARNING_CODES = frozenset(
         "low_confidence",
         "scope_mismatch",
         "issuer_mismatch",
+        "incomplete_period",
+        "structure_unverified",
+        "structure_unavailable",
+        "structure_scope_limited",
+        "structure_content_unverified",
+        "conflicting_values",
+        "unit_mismatch",
         "citation_outside_manifest",
     }
 )
@@ -178,6 +185,10 @@ class AnswerGenerator:
         history: Sequence[Mapping[str, Any]] | None = None,
         repair: bool = False,
         diagnostics: Mapping[str, Any] | None = None,
+        answer_mode: str = "concise",
+        structural_changes: Sequence[Mapping[str, Any]] | None = None,
+        section_matches: Sequence[Mapping[str, Any]] | None = None,
+        missing_years: Sequence[int] | None = None,
     ) -> Answer:
         """Возвращает проверенный ответ или безопасный abstain; текст провайдера не всплывает."""
         if not isinstance(question, str):
@@ -216,11 +227,32 @@ class AnswerGenerator:
         if not packed.records:
             return Answer("abstain", NO_EVIDENCE_TEXT, warnings=["no_evidence"])
 
+        analysis_context: dict[str, Any] = {}
+        if answer_mode in {"concise", "comparison", "outline"}:
+            analysis_context["answer_mode"] = answer_mode
+        if missing_years:
+            analysis_context["missing_years"] = [
+                int(year) for year in missing_years
+            ]
+        if structural_changes:
+            analysis_context["structural_changes"] = [
+                dict(item)
+                for item in list(structural_changes)[:40]
+                if isinstance(item, Mapping)
+            ]
+        if section_matches:
+            analysis_context["section_matches"] = [
+                dict(item)
+                for item in list(section_matches)[:40]
+                if isinstance(item, Mapping)
+            ]
+
         user_prompt = build_user_prompt(
             question,
             packed.records,
             history=history,
             repair=repair or diagnostics is not None,
+            analysis_context=analysis_context or None,
         )
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},

@@ -2,11 +2,27 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from src.retrieval.hybrid_retriever import SearchFilters
+
+
+def _supports_keyword(target: Any, keyword: str) -> bool:
+    try:
+        parameters = inspect.signature(target).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(
+        item.kind == inspect.Parameter.VAR_KEYWORD
+        or (
+            item.name == keyword
+            and item.kind != inspect.Parameter.POSITIONAL_ONLY
+        )
+        for item in parameters
+    )
 
 
 class ToolUnavailable(RuntimeError):
@@ -85,12 +101,36 @@ class AgentTools:
             top_k = args.get("top_k", self.top_k)
             if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k < 1:
                 raise ValueError("invalid_top_k")
+            queries = args.get("queries")
+            if queries is not None:
+                if not isinstance(queries, (list, tuple)) or not all(
+                    isinstance(item, str) and item.strip() for item in queries
+                ):
+                    raise ValueError("invalid_queries")
+                queries = list(dict.fromkeys(item.strip() for item in queries))[:3]
+
             top_k = min(top_k, self.top_k)
-            if hasattr(backend, "retrieve"):
-                result = backend.retrieve(query, filters=filters)
-            else:
-                result = backend(query, filters=filters, retrieval_mode=mode, top_k=top_k)
-            return result
+            retrieve = getattr(backend, "retrieve", None)
+            if callable(retrieve):
+                kwargs: dict[str, Any] = {"filters": filters}
+                if _supports_keyword(retrieve, "top_k"):
+                    kwargs["top_k"] = top_k
+                if _supports_keyword(retrieve, "retrieval_mode"):
+                    kwargs["retrieval_mode"] = mode
+                if queries and _supports_keyword(retrieve, "queries"):
+                    kwargs["queries"] = queries
+                return retrieve(query, **kwargs)
+            if queries and _supports_keyword(backend, "queries"):
+                return backend(
+                    query,
+                    filters=filters,
+                    retrieval_mode=mode,
+                    top_k=top_k,
+                    queries=queries,
+                )
+            return backend(
+                query, filters=filters, retrieval_mode=mode, top_k=top_k
+            )
 
         if name == "get_structure_tree":
             backend = self.structure_backend

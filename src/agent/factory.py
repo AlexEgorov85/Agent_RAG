@@ -16,7 +16,10 @@ import os
 from pathlib import Path
 from typing import Any, Mapping
 
+from src.agent.llm_router import LLMRouter
+from src.agent.selector import PlanAwareSelector
 from src.agent.service import AgentService
+from src.agent.simple_router import SimpleRouter
 from src.agent.tools import AgentTools
 from src.core.cache import cached_document_vectors
 from src.core.corpus import load_chunks
@@ -25,8 +28,10 @@ from src.core.dense_index import DenseIndex
 from src.core.embeddings import CourseEmbeddings
 from src.core.rag_config import RAGSettings, load_rag_settings
 from src.engine.generator import AnswerGenerator
+from src.engine.structure_compare import StructureAnalyzer
 from src.retrieval.bm25 import BM25Index
 from src.retrieval.hybrid_retriever import HybridRetriever
+from src.retrieval.rewrite import QueryRewriter
 
 #: Префикс запроса, совместимый с уже собранным кэшем курсового dev-корпуса.
 DEFAULT_QUERY_PREFIX = "query:"
@@ -223,7 +228,29 @@ def create_agent_service(
         candidates=settings.candidates,
         rerank_pool=settings.rerank_pool,
         top_k=settings.top_k,
+        diversity=True,
     )
+    available_years = {
+        int(chunk["year"])
+        for chunk in chunks
+        if chunk.get("year") is not None
+    }
+    documents_by_year: dict[int, list[str]] = {}
+    for chunk in chunks:
+        year = chunk.get("year")
+        doc_id = chunk.get("doc_id")
+        if year is None or not isinstance(doc_id, str) or not doc_id:
+            continue
+        try:
+            normalized_year = int(year)
+        except (TypeError, ValueError):
+            continue
+        ids = documents_by_year.setdefault(normalized_year, [])
+        if doc_id not in ids:
+            ids.append(doc_id)
+    for ids in documents_by_year.values():
+        ids.sort()
+
     tools = AgentTools(
         search_backend=retriever,
         structure_backend=_structure_backend(
@@ -238,4 +265,40 @@ def create_agent_service(
         max_context_chars=settings.context_chars,
         max_context_tokens=settings.context_tokens,
     )
-    return AgentService(tools, answerer=answerer)
+
+    use_llm_router = os.getenv("LLM_ROUTER_ENABLED", "1").strip() == "1"
+    if use_llm_router:
+        router = LLMRouter(
+            client,
+            settings.router_model or settings.model,
+            sorted(available_years),
+        )
+    else:
+        router = SimpleRouter(available_years)
+
+    use_structure_llm = (
+        os.getenv("LLM_STRUCTURE_VERIFY", "1").strip() == "1"
+    )
+    structure_analyzer = StructureAnalyzer(
+        client if use_structure_llm else None,
+        (settings.router_model or settings.model) if use_structure_llm else None,
+    )
+    use_rewriter = os.getenv("LLM_REWRITE_ENABLED", "1").strip() == "1"
+    query_rewriter = (
+        QueryRewriter(
+            client,
+            settings.router_model or settings.model,
+        )
+        if use_rewriter
+        else None
+    )
+
+    return AgentService(
+        tools,
+        answerer=answerer,
+        router=router,
+        action_selector=PlanAwareSelector(),
+        documents_by_year=documents_by_year,
+        structure_analyzer=structure_analyzer,
+        query_rewriter=query_rewriter,
+    )

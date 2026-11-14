@@ -10,9 +10,11 @@ from typing import Any
 import pytest
 
 from src.agent.factory import create_agent_service
+from src.agent.llm_router import LLMRouter
 from src.agent.service import create_agent_service as service_factory
 from src.agent.tools import ToolUnavailable
 from src.core.rag_config import RAGSettings
+from src.retrieval.hybrid_retriever import HybridRetriever
 
 
 class FakeEmbeddingsEndpoint:
@@ -119,6 +121,11 @@ def test_factory_builds_service_and_answers_with_citation(
     assert [event.tool_name for event in result.tool_events] == ["search_reports"]
     # Для этого детерминированного теста реранкер явно отключён.
     assert service.tools.search_backend.reranker is None
+    assert isinstance(service.tools.search_backend, HybridRetriever)
+    assert isinstance(service.router, LLMRouter)
+    assert service.router.available_years == (2023,)
+    assert result.retrieval_diagnostics
+    assert result.retrieval_diagnostics[0]["retrieval_mode"] == "hybrid"
 
 
 def test_reranker_is_enabled_by_default_and_can_be_disabled(

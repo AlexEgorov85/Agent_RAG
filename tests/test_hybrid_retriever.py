@@ -187,6 +187,68 @@ def test_defaults_cap_channel_rerank_pool_and_output() -> None:
     assert result.hits[0].rerank_score == 3.0
 
 
+def test_query_variants_are_fused_and_counted_in_trace() -> None:
+    docs = [chunk("c1", score=1.0), chunk("c2", score=0.5)]
+    engine, _, _ = retriever(docs, docs)
+
+    result = engine.retrieve(
+        "original",
+        queries=["variant one", "variant two"],
+    )
+
+    assert result.trace.query_count == 3
+    assert set(result.trace.__dict__) >= {
+        "query_count",
+        "retrieval_mode",
+        "distinct_docs",
+        "distinct_sections",
+    }
+    assert result.trace.retrieval_mode == "hybrid"
+
+
+def test_diversity_prefers_distinct_sections() -> None:
+    dense = [
+        chunk("a1", score=3.0, section_path="A"),
+        chunk("a2", score=2.5, section_path="A"),
+        chunk("b1", score=2.0, section_path="B"),
+    ]
+    dense_index = FakeIndex(dense)
+    bm25_index = FakeIndex(dense)
+    engine = HybridRetriever(
+        dense_index,
+        bm25_index,
+        FakeEmbedder(),
+        top_k=2,
+        diversity=True,
+    )
+
+    result = engine.retrieve("question")
+
+    assert [hit.chunk_id for hit in result.hits] == ["a1", "b1"]
+    assert result.trace.diversity_removed >= 1
+
+
+def test_retrieval_mode_can_use_only_one_channel() -> None:
+    dense = [chunk("dense", score=1.0)]
+    bm25 = [chunk("keyword", score=2.0)]
+    engine, dense_index, bm25_index = retriever(dense, bm25)
+
+    keyword = engine.retrieve("question", retrieval_mode="keyword")
+    dense_only = engine.retrieve("question", retrieval_mode="dense")
+
+    assert [hit.chunk_id for hit in keyword.hits] == ["keyword"]
+    assert [hit.chunk_id for hit in dense_only.hits] == ["dense"]
+    assert dense_index.calls[-1][1] == 20
+    assert bm25_index.calls[-1][1] == 20
+
+
+def test_invalid_retrieval_mode_is_rejected() -> None:
+    engine, _, _ = retriever([], [])
+
+    with pytest.raises(ValueError):
+        engine.retrieve("question", retrieval_mode="unknown")
+
+
 def test_explicit_year_range_reports_missing_years_without_synthesizing_hits() -> None:
     docs = [chunk("y2020", score=1, year=2020), chunk("y2022", score=1, year=2022)]
     engine, _, _ = retriever(docs, docs)

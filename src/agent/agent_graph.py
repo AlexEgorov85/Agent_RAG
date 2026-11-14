@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import inspect
+import re
 import time
 import uuid
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, is_dataclass, replace
 from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
@@ -16,6 +17,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.agent.selector import PlanAwareSelector, content_attempt_key
 from src.agent.state import AgentAction, AgentState, Answer, QueryPlan, ToolEvent
 from src.agent.tools import (
     AgentTools,
@@ -24,10 +26,28 @@ from src.agent.tools import (
     result_hits,
     result_warnings,
 )
+from src.engine.calculations import parse_number
+from src.engine.structure_compare import (
+    StructureAnalyzer,
+    compare_content_changes,
+)
 from src.retrieval.hybrid_retriever import SearchFilters
 
-MAX_TOOL_CALLS = 4
-MAX_SEARCH_CALLS = 2
+#: Бюджеты — защитный механизм, а не основной способ управления исследованием.
+MAX_TOOL_CALLS = 8
+MAX_SEARCH_CALLS = 5
+
+_METRIC_TERMS = (
+    "прибыль",
+    "выручка",
+    "roe",
+    "roa",
+    "актив",
+    "капитал",
+    "доход",
+    "расход",
+    "маржа",
+)
 
 
 class Router(Protocol):
@@ -169,6 +189,184 @@ def _contained_chunk_id(chunk: Any) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def _chunk_year(chunk: Any) -> int | None:
+    if isinstance(chunk, Mapping):
+        value = chunk.get("year")
+    else:
+        value = getattr(chunk, "year", None)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _year_from_doc_id(doc_id: Any) -> int | None:
+    if not isinstance(doc_id, str):
+        return None
+    match = re.search(r"(?:18|19|20|21)\d{2}", doc_id)
+    return int(match.group(0)) if match is not None else None
+
+
+def _requested_years(value: Any) -> set[int]:
+    if isinstance(value, SearchFilters):
+        if value.years:
+            return set(value.years)
+        start = value.year_from if value.year_from is not None else value.year_to
+        end = value.year_to if value.year_to is not None else value.year_from
+        if start is None or end is None:
+            return set()
+        return set(range(min(start, end), max(start, end) + 1))
+    if not isinstance(value, Mapping):
+        return set()
+    years = value.get("years")
+    if isinstance(years, (list, tuple, set)):
+        return {
+            int(year)
+            for year in years
+            if isinstance(year, int) and not isinstance(year, bool)
+        }
+    start = value.get("year_from")
+    end = value.get("year_to")
+    if not isinstance(start, int) or isinstance(start, bool):
+        start = None
+    if not isinstance(end, int) or isinstance(end, bool):
+        end = None
+    if start is None and end is None:
+        return set()
+    start = start if start is not None else end
+    end = end if end is not None else start
+    return set(range(min(start, end), max(start, end) + 1))
+
+
+def _filters_dict(filters: SearchFilters) -> dict[str, Any]:
+    return {
+        key: sorted(value) if isinstance(value, set) else value
+        for key, value in vars(filters).items()
+    }
+
+
+def _intersect(left: Any, right: Any) -> Any:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    if isinstance(left, set) and isinstance(right, set):
+        result = left & right
+        return result if result else left
+    return left
+
+
+def _narrower_prefix(base: str | None, action: str | None) -> str | None:
+    if base is None:
+        return action
+    if action is None:
+        return base
+    base_text = base.strip("/").casefold()
+    action_text = action.strip("/").casefold()
+    if action_text == base_text or action_text.startswith(base_text + "/"):
+        return action
+    return base
+
+
+def _merge_action_filters(
+    effective: SearchFilters,
+    action_filters: Any,
+) -> SearchFilters:
+    """Сужает пользовательские/плановые фильтры, но никогда не расширяет их."""
+    if not isinstance(action_filters, SearchFilters):
+        if not isinstance(action_filters, Mapping):
+            return effective
+        allowed = set(SearchFilters.__dataclass_fields__)
+        try:
+            action_filters = SearchFilters(
+                **{
+                    key: value
+                    for key, value in action_filters.items()
+                    if key in allowed
+                }
+            ).normalized()
+        except (TypeError, ValueError):
+            return effective
+
+    if action_filters.normalized() == effective.normalized():
+        return effective
+
+    base_years = _requested_years(effective)
+    action_years = _requested_years(action_filters)
+    if base_years and action_years:
+        years = base_years & action_years
+        if not years:
+            years = base_years
+    elif action_years:
+        years = action_years
+    else:
+        years = base_years
+
+    year_from = effective.year_from
+    year_to = effective.year_to
+    if years:
+        year_from = year_to = None
+
+    return SearchFilters(
+        years=set(years) if years else None,
+        year_from=year_from,
+        year_to=year_to,
+        report_periods=_intersect(
+            effective.report_periods, action_filters.report_periods
+        ),
+        issuers=_intersect(effective.issuers, action_filters.issuers),
+        kinds=_intersect(effective.kinds, action_filters.kinds),
+        section_path_prefix=_narrower_prefix(
+            effective.section_path_prefix,
+            action_filters.section_path_prefix,
+        ),
+        breadcrumb_contains=(
+            effective.breadcrumb_contains or action_filters.breadcrumb_contains
+        ),
+        max_section_level=(
+            action_filters.max_section_level
+            if effective.max_section_level is None
+            else effective.max_section_level
+            if action_filters.max_section_level is None
+            else min(
+                effective.max_section_level, action_filters.max_section_level
+            )
+        ),
+        allowed_doc_ids=_intersect(
+            effective.allowed_doc_ids, action_filters.allowed_doc_ids
+        ),
+    ).normalized()
+
+
+def _fact_year(fact: Any) -> int | None:
+    if not isinstance(fact, Mapping):
+        return None
+    value = fact.get("year", fact.get("period"))
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        match = re.search(r"\b(18|19|20|21)\d{2}\b", value)
+        if match is not None:
+            return int(match.group(0))
+    return None
+
+
+def _metric_terms(question: str) -> list[str]:
+    text = question.casefold()
+    return [term for term in _METRIC_TERMS if term in text]
+
+
+def _chunk_mentions_metric(chunk: Any, terms: list[str]) -> bool:
+    if not terms:
+        return True
+    if isinstance(chunk, Mapping):
+        text = f"{chunk.get('text', '')} {chunk.get('html', '')}"
+    else:
+        text = f"{getattr(chunk, 'text', '')} {getattr(chunk, 'html', '')}"
+    normalized = str(text).casefold()
+    return any(term in normalized for term in terms)
+
+
 def _safe_action(value: Any) -> AgentAction | None:
     if value is None:
         return None
@@ -217,14 +415,18 @@ def build_agent_graph(
     on_event: Callable[[str, dict[str, Any]], None] | None = None,
     answer_generator: Callable[[AgentState], tuple[Answer, list[str]]] | None = None,
     answer_validator: Callable[[Answer, set[str]], bool] | None = None,
+    structure_analyzer: StructureAnalyzer | None = None,
+    query_rewriter: Any = None,
 ):
     """Строит StateGraph с лимитами на вызовы инструментов и поиска."""
     router = router or _DefaultRouter()
-    action_selector = action_selector or _DefaultSelector()
+    action_selector = action_selector or PlanAwareSelector()
+    structure_analyzer = structure_analyzer or StructureAnalyzer()
 
     class SearchInput(BaseModel):
         model_config = ConfigDict(extra="forbid")
         query: str = Field(min_length=1)
+        queries: list[str] | None = None
         filters: dict[str, Any] | None = None
         retrieval_mode: str = "hybrid"
         top_k: int = 5
@@ -298,14 +500,16 @@ def build_agent_graph(
 
     @tool("search_reports", args_schema=SearchInput)
     def search_reports(
-        query: str, filters: dict[str, Any] | None = None,
+        query: str, queries: list[str] | None = None,
+        filters: dict[str, Any] | None = None,
         retrieval_mode: str = "hybrid", top_k: int = 5,
     ) -> str:
         """Ищет по корпусу отчётов с проверенными фильтрами."""
         return wrapped(
             "search_reports",
             {
-                "query": query, "filters": filters_from_dict(filters),
+                "query": query, "queries": queries,
+                "filters": filters_from_dict(filters),
                 "retrieval_mode": retrieval_mode, "top_k": top_k,
             },
         )
@@ -375,9 +579,38 @@ def build_agent_graph(
             )
             return {
                 "query_plan": plan,
+                "expected_years": sorted(
+                    _requested_years(state.get("filters") or SearchFilters())
+                ),
+                "rewritten_queries": [],
                 "warnings": state.get("warnings", []) + ["query_analysis_fallback"],
             }
         effective = _filters_with_plan(state["filters"], plan)
+        # Явные фильтры пользователя уже учтены в effective и важнее плана.
+        expected_years = _requested_years(effective) or set(plan.years)
+        rewritten_queries: list[str] = []
+        analysis_warnings: list[str] = []
+        if plan.needs_rewriting and query_rewriter is not None:
+            try:
+                target = (
+                    query_rewriter.rewrite
+                    if hasattr(query_rewriter, "rewrite")
+                    else query_rewriter
+                )
+                rewrite_kwargs = {}
+                if _supports_keyword(target, "history"):
+                    rewrite_kwargs["history"] = list(
+                        state.get("history", [])
+                    )
+                variants = target(state["question"], **rewrite_kwargs)
+                if isinstance(variants, (list, tuple)):
+                    rewritten_queries = [
+                        item
+                        for item in variants
+                        if isinstance(item, str) and item.strip()
+                    ][:2]
+            except Exception:
+                analysis_warnings.append("query_rewrite_fallback")
         emit(
             "analysis_completed",
             {"intent": plan.intent, "effective_filters": effective},
@@ -385,6 +618,9 @@ def build_agent_graph(
         return {
             "query_plan": plan,
             "effective_filters": effective,
+            "expected_years": sorted(expected_years),
+            "rewritten_queries": rewritten_queries,
+            "warnings": list(state.get("warnings", [])) + analysis_warnings,
         }
 
     def choose_action(state: AgentState) -> dict[str, Any]:
@@ -454,10 +690,10 @@ def build_agent_graph(
                 }
         arguments = dict(action.arguments)
         if action.tool_name in {"search_reports", "get_entities"}:
-            arguments["filters"] = {
-                key: sorted(value) if isinstance(value, set) else value
-                for key, value in vars(state["effective_filters"]).items()
-            }
+            merged = _merge_action_filters(
+                state["effective_filters"], arguments.get("filters")
+            )
+            arguments["filters"] = _filters_dict(merged)
         schema = {
             "search_reports": SearchInput,
             "get_structure_tree": StructureInput,
@@ -531,7 +767,9 @@ def build_agent_graph(
         emit("tool_started", {
             "tool_name": action.tool_name,
             "short_arguments": {
-                key: ("[redacted]" if key in {"query", "entity_names", "chunk_id"} else value)
+                key: ("[redacted]" if key in {
+                    "query", "queries", "entity_names", "chunk_id"
+                } else value)
                 for key, value in args.items() if key != "filters"
             },
         })
@@ -561,7 +799,9 @@ def build_agent_graph(
         status = payload.get("_agent_status", "failed")
         warning = payload.get("warning")
         short_args = {
-            key: ("[redacted]" if key in {"query", "entity_names", "chunk_id"} else value)
+            key: ("[redacted]" if key in {
+                "query", "queries", "entity_names", "chunk_id"
+            } else value)
             for key, value in arguments.items()
             if key not in {"filters"}
         }
@@ -574,9 +814,28 @@ def build_agent_graph(
                 }
             short_args["filters"] = filters
         duration = float(payload.get("_duration_ms", 0.0))
-        count = len(result_hits(result)) if action.tool_name == "search_reports" else (
-            len(result) if isinstance(result, (list, tuple)) else int(result is not None)
-        )
+        if action.tool_name == "search_reports":
+            count = len(result_hits(result))
+        elif action.tool_name == "get_structure_tree" and isinstance(
+            result, Mapping
+        ):
+            count = len(result.get("sections", []) or [])
+        else:
+            count = (
+                len(result)
+                if isinstance(result, (list, tuple))
+                else int(result is not None)
+            )
+        diagnostics: dict[str, Any] | None = None
+        if action.tool_name == "search_reports" and result is not None:
+            if isinstance(result, Mapping):
+                trace = result.get("trace")
+                if isinstance(trace, Mapping):
+                    diagnostics = dict(trace)
+            else:
+                trace = getattr(result, "trace", None)
+                if is_dataclass(trace):
+                    diagnostics = asdict(trace)
         event = ToolEvent(
             tool_name=action.tool_name,
             arguments=short_args,
@@ -584,12 +843,16 @@ def build_agent_graph(
             result_count=count,
             duration_ms=duration,
             warning=warning,
+            diagnostics=diagnostics,
         )
         results = list(state.get("retrieval_results", []))
         evidence = dict(state.get("evidence", {}))
         manifest = set(state.get("evidence_manifest", set()))
         search_manifest = set(state.get("search_evidence_manifest", set()))
         graph_manifest = set(state.get("graph_evidence_manifest", set()))
+        structure_documents = dict(state.get("structure_documents", {}))
+        structure_snapshots = dict(state.get("structure_snapshots", {}))
+        search_attempts = list(state.get("search_attempts", []))
         warnings = list(state.get("warnings", []))
         if action.tool_name == "search_reports" and result is not None:
             results.append(result)
@@ -603,6 +866,14 @@ def build_agent_graph(
                     evidence[chunk_id] = chunk
         elif action.tool_name == "get_entities" and result is not None:
             graph_manifest.update(_graph_evidence_ids(result))
+        elif action.tool_name == "get_structure_tree" and result is not None:
+            if isinstance(result, Mapping):
+                doc_id = result.get("doc_id") or arguments.get("doc_id")
+                sections = result.get("sections")
+                year = _year_from_doc_id(doc_id)
+                if isinstance(year, int) and isinstance(sections, list):
+                    structure_documents[year] = str(doc_id)
+                    structure_snapshots[year] = list(sections)
         elif action.tool_name == "get_chunk" and result is not None:
             chunk_id, chunk = chunk_from_hit(result)
             inner_id = _contained_chunk_id(chunk)
@@ -620,6 +891,67 @@ def build_agent_graph(
                 warnings.append("chunk_not_authorized")
         elif status in {"tool_unavailable", "failed"} and warning:
             warnings.append(warning)
+
+        covered_years = sorted(
+            {
+                year
+                for chunk in evidence.values()
+                if (year := _chunk_year(chunk)) is not None
+            }
+        )
+        requested_years = _requested_years(state.get("effective_filters", SearchFilters()))
+        if len(requested_years) > 1 and requested_years - set(covered_years):
+            warnings.append("incomplete_period")
+
+        plan = state.get("query_plan") or QueryPlan()
+        if action.tool_name == "search_reports":
+            filters = arguments.get("filters")
+            if isinstance(filters, SearchFilters):
+                filters = _filters_dict(filters)
+            requested_now = _requested_years(filters)
+            if (
+                plan.intent == "structural"
+                and action.reason_code == "inspect_evidence"
+            ):
+                kind = "structure_content"
+            elif searches == 0:
+                kind = "broad"
+            elif len(requested_now) == 1:
+                kind = "year"
+            else:
+                kind = "broad"
+            search_attempts.append(
+                {
+                    "kind": kind,
+                    "year": (
+                        next(iter(requested_now))
+                        if len(requested_now) == 1
+                        else None
+                    ),
+                    "years": sorted(requested_now),
+                    "section_path": (
+                        filters.get("section_path_prefix")
+                        if isinstance(filters, Mapping)
+                        else None
+                    ),
+                    "result_count": count,
+                    "covered_years": covered_years,
+                }
+            )
+        elif action.tool_name == "get_structure_tree":
+            search_attempts.append(
+                {
+                    "kind": "structure",
+                    "year": _year_from_doc_id(arguments.get("doc_id")),
+                    "doc_id": arguments.get("doc_id"),
+                    "result_count": count,
+                }
+            )
+        elif action.tool_name == "get_entities":
+            search_attempts.append(
+                {"kind": "graph", "result_count": count}
+            )
+
         if calls + 1 >= MAX_TOOL_CALLS:
             warnings.append("tool_budget_exhausted")
         emit(
@@ -640,6 +972,10 @@ def build_agent_graph(
             "search_evidence_manifest": search_manifest,
             "graph_evidence_manifest": graph_manifest,
             "evidence": evidence,
+            "structure_documents": structure_documents,
+            "structure_snapshots": structure_snapshots,
+            "search_attempts": search_attempts,
+            "covered_years": covered_years,
             "warnings": warnings,
             "tool_calls_used": calls + 1,
             "search_calls_used": searches + int(action.tool_name == "search_reports"),
@@ -648,8 +984,108 @@ def build_agent_graph(
     def assess_evidence(state: AgentState) -> dict[str, Any]:
         # Селектор намеренно опрашивается заново после каждого результата:
         # он может выбрать ограниченное продолжение (например, структура → поиск).
-        enough = bool(state.get("evidence_manifest"))
-        return {"status": "evidence_available" if enough else "evidence_pending"}
+        plan = state.get("query_plan") or QueryPlan()
+        effective = state.get("effective_filters") or SearchFilters()
+        evidence = state.get("evidence", {})
+        expected = set(state.get("expected_years", []))
+        if not expected:
+            expected = set(plan.years)
+        if not expected and plan.year_from is not None and plan.year_to is not None:
+            expected = set(range(plan.year_from, plan.year_to + 1))
+        if not expected:
+            expected = _requested_years(effective)
+        terms = _metric_terms(state.get("question", ""))
+        covered = {
+            year
+            for chunk in evidence.values()
+            if _chunk_mentions_metric(chunk, terms)
+            and (year := _chunk_year(chunk)) is not None
+        }
+        missing = sorted(expected - covered)
+        warnings = list(state.get("warnings", []))
+        updates: dict[str, Any] = {
+            "expected_years": sorted(expected),
+            "covered_years": sorted(covered),
+            "missing_years": missing,
+        }
+
+        if plan.intent == "structural" and not state.get(
+            "structure_comparison_complete"
+        ):
+            snapshots = state.get("structure_snapshots", {})
+            documents = state.get("available_documents", {})
+            attempts = state.get("search_attempts", [])
+            attempted_structure = {
+                item.get("year")
+                for item in attempts
+                if isinstance(item, dict) and item.get("kind") == "structure"
+            }
+            target_years = sorted(expected) or sorted(documents) or sorted(snapshots)
+            unresolved = [
+                year
+                for year in target_years
+                if year not in snapshots
+                and year not in attempted_structure
+                and documents.get(year)
+            ]
+            if not unresolved:
+                if len(snapshots) >= 2:
+                    analysis = structure_analyzer.compare(
+                        snapshots, sorted(snapshots)
+                    )
+                    updates.update(analysis)
+                updates["structure_comparison_complete"] = True
+                if len(target_years) > len(snapshots):
+                    warnings.append("structure_scope_limited")
+                if not snapshots and target_years:
+                    warnings.append("structure_unavailable")
+
+        matches = updates.get(
+            "section_matches", state.get("section_matches", [])
+        )
+        if matches and evidence:
+            found_content = compare_content_changes(matches, evidence)
+            existing_content = list(state.get("content_changes", []))
+            known_content = {
+                (
+                    item.get("from_year"),
+                    item.get("to_year"),
+                    (item.get("to_section") or {}).get("section_path"),
+                    item.get("change_type"),
+                )
+                for item in existing_content
+                if isinstance(item, Mapping)
+            }
+            new_content = [
+                item
+                for item in found_content
+                if (
+                    item.get("from_year"),
+                    item.get("to_year"),
+                    (item.get("to_section") or {}).get("section_path"),
+                    item.get("change_type"),
+                )
+                not in known_content
+            ]
+            if new_content:
+                updates["content_changes"] = existing_content + new_content
+                structural = list(
+                    updates.get(
+                        "structural_changes",
+                        state.get("structural_changes", []),
+                    )
+                )
+                structural.extend(new_content)
+                updates["structural_changes"] = structural
+
+        if plan.answer_mode == "comparison" and missing:
+            updates["status"] = "evidence_incomplete"
+        elif evidence:
+            updates["status"] = "evidence_available"
+        else:
+            updates["status"] = "evidence_pending"
+        updates["warnings"] = warnings
+        return updates
 
     def safe_result_warnings(result: Any) -> list[str]:
         safe: list[str] = []
@@ -723,6 +1159,95 @@ def build_agent_graph(
                 "Ответ не прошёл проверку источников.",
                 warnings=["citation_validation_failed"],
             )
+        elif answer.status == "answer":
+            extra: list[str] = []
+            plan = state.get("query_plan") or QueryPlan()
+            expected = set(state.get("expected_years", [])) or set(plan.years)
+            facts = [fact for fact in answer.facts if isinstance(fact, Mapping)]
+            fact_years = {
+                year
+                for fact in facts
+                if (year := _fact_year(fact)) is not None
+            }
+            if (
+                plan.answer_mode == "comparison"
+                and len(expected) > 1
+                and facts
+                and len(fact_years) < 2
+            ):
+                extra.append("incomplete_period")
+            if expected and fact_years and expected - fact_years:
+                extra.append("incomplete_period")
+
+            values: dict[tuple[str, int], str] = {}
+            units: dict[str, set[str]] = {}
+            for fact in facts:
+                metric = fact.get("metric", fact.get("claim"))
+                year = _fact_year(fact)
+                if not isinstance(metric, str) or year is None:
+                    continue
+                normalized_metric = metric.strip().casefold()
+                unit = fact.get("unit")
+                if isinstance(unit, str) and unit.strip():
+                    units.setdefault(normalized_metric, set()).add(
+                        unit.strip().casefold()
+                    )
+                if "value" in fact:
+                    key = (normalized_metric, year)
+                    parsed = parse_number(fact.get("value"))
+                    value = str(parsed) if parsed is not None else str(
+                        fact.get("value")
+                    )
+                    previous = values.get(key)
+                    if previous is not None and previous != value:
+                        extra.append("conflicting_values")
+                    values[key] = value
+            if any(len(items) > 1 for items in units.values()):
+                extra.append("unit_mismatch")
+            if plan.intent == "structural":
+                if not state.get("structure_comparison_complete"):
+                    extra.append("structure_unverified")
+                checked = {
+                    content_attempt_key(item)
+                    for item in state.get("search_attempts", [])
+                    if isinstance(item, dict)
+                    and item.get("kind") == "structure_content"
+                }
+                unverified = []
+                for change in state.get("structural_changes", []):
+                    if not isinstance(change, Mapping):
+                        continue
+                    if change.get("change_type") == "stable":
+                        continue
+                    if change.get("change_type") == "removed":
+                        year = change.get("from_year")
+                        section = change.get("from_section")
+                    else:
+                        year = change.get("to_year") or change.get("from_year")
+                        section = change.get("to_section") or change.get(
+                            "from_section"
+                        )
+                    path = (
+                        section.get("section_path")
+                        if isinstance(section, Mapping)
+                        else None
+                    )
+                    verified = any(
+                        path == checked_path
+                        and (not years or year in years)
+                        for years, checked_path in checked
+                    )
+                    if not verified:
+                        unverified.append(change)
+                if unverified:
+                    extra.append("structure_content_unverified")
+            if extra:
+                answer = replace(
+                    answer,
+                    warnings=list(
+                        dict.fromkeys(list(answer.warnings) + extra)
+                    ),
+                )
         return {
             "answer": answer,
             "status": "abstained" if answer.status == "abstain" else "completed",
@@ -745,8 +1270,10 @@ def build_agent_graph(
         return "harvest_tool_result"
 
     def after_assess(state: AgentState) -> str:
-        if state.get("tool_calls_used", 0) >= MAX_TOOL_CALLS:
-            return "validate_answer"
+        # Даже при исчерпанном бюджете сначала пытаемся сформировать ответ по
+        # уже собранным evidence; choose_action сам вернёт None и уведёт граф
+        # в generate_answer.
+        del state
         return "choose_action"
 
     graph.add_conditional_edges(

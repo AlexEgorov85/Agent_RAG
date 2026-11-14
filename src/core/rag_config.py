@@ -37,6 +37,9 @@ class RAGSettings(BaseSettings):
     rerank_model: str = Field(
         default="ai-sage/GigaChat3-10B-A1.8B",
         validation_alias=AliasChoices("RERANKER_MODEL", "RERANK_MODEL"))
+    router_model: str = Field(
+        default="",
+        validation_alias=AliasChoices("ROUTER_MODEL", "LLM_ROUTER_MODEL"))
 
     top_k: int = 5
     candidates: int = 20

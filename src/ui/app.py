@@ -14,9 +14,7 @@ except ImportError:  # Streamlit может исполнять этот файл
     from citations import render_citations
 
 
-AVAILABLE_YEARS = (2015, 2016, 2017, 2018, 2019, 2020, 2022, 2023, 2024)
 AVAILABLE_ISSUERS = ("ПАО Сбербанк", "БПС-Сбербанк (Беларусь)")
-AVAILABLE_DOC_IDS = tuple(f"sber_{year}" for year in AVAILABLE_YEARS)
 _ALLOWED_TOOLS = {"search_reports", "get_structure_tree", "get_entities", "get_chunk"}
 _SECRET_KEY = re.compile(r"(api.?key|secret|token|password|credential)", re.IGNORECASE)
 
@@ -24,6 +22,33 @@ _SECRET_KEY = re.compile(r"(api.?key|secret|token|password|credential)", re.IGNO
 def new_conversation_id() -> str:
     """Создаёт непрозрачный уникальный ID изолированного диалога."""
     return str(uuid.uuid4())
+
+
+def service_options(service: Any) -> tuple[tuple[int, ...], tuple[str, ...]]:
+    """Годы и doc_id из фактического индекса, без списка годов в коде.
+
+    Если backend не умеет сообщать покрытие, UI оставляет фильтры пустыми:
+    это честнее, чем показывать годы, которых может не быть в корпусе.
+    """
+    backend = getattr(getattr(service, "tools", None), "search_backend", None)
+    years: tuple[int, ...] = ()
+    doc_ids: tuple[str, ...] = ()
+
+    method = getattr(backend, "available_years", None)
+    if callable(method):
+        try:
+            years = tuple(sorted({int(year) for year in method()}))
+        except (TypeError, ValueError):
+            years = ()
+
+    method = getattr(backend, "available_doc_ids", None)
+    if callable(method):
+        try:
+            doc_ids = tuple(sorted({str(item) for item in method() if item}))
+        except (TypeError, ValueError):
+            doc_ids = ()
+
+    return years, doc_ids
 
 
 def normalize_filters(
@@ -261,6 +286,65 @@ def _render_warnings(st: Any, warnings: Any) -> None:
                 st.warning(_safe_text(str(warning), 300))
 
 
+def _render_analysis(st: Any, result: Any) -> None:
+    """Показывает расчёты, структурные изменения и диагностику retrieval."""
+    if result is None:
+        return
+    answer = _get(result, "answer", result)
+    calculations = _get(result, "calculations", None) or _get(
+        answer, "calculations", []
+    ) or []
+    changes = _get(result, "structural_changes", []) or []
+    diagnostics = _get(result, "retrieval_diagnostics", []) or []
+
+    if calculations:
+        with st.expander("Расчёты по фактам"):
+            for item in calculations:
+                if not isinstance(item, dict):
+                    continue
+                st.write(
+                    f"{item.get('metric', 'Показатель')}: "
+                    f"{item.get('from_year')}→{item.get('to_year')}, "
+                    f"{item.get('absolute_change')} "
+                    f"{item.get('unit', '')}".strip()
+                )
+
+    if changes:
+        with st.expander("Изменения структуры"):
+            for item in changes:
+                if not isinstance(item, dict):
+                    continue
+                section = (
+                    (item.get("to_section") or {}).get("title")
+                    or (item.get("from_section") or {}).get("title")
+                    or "раздел"
+                )
+                st.write(
+                    f"{item.get('from_year')}→{item.get('to_year')}: "
+                    f"{section} — `{item.get('change_type')}` "
+                    f"({item.get('detail', '')})"
+                )
+
+    if diagnostics:
+        with st.expander("Диагностика поиска"):
+            for item in diagnostics:
+                if not isinstance(item, dict):
+                    continue
+                st.write(
+                    "Режим: {mode}; запросов: {queries}; "
+                    "кандидатов: {fused}; возвращено: {returned}; "
+                    "документов: {docs}; разделов: {sections}; лет: {years}".format(
+                        mode=item.get("retrieval_mode", "hybrid"),
+                        queries=item.get("query_count", 1),
+                        fused=item.get("fused_candidates", 0),
+                        returned=item.get("returned", 0),
+                        docs=item.get("distinct_docs", 0),
+                        sections=item.get("distinct_sections", 0),
+                        years=item.get("distinct_years", 0),
+                    )
+                )
+
+
 def _render_tool_trace(st: Any, trace: list[dict[str, Any]]) -> None:
     if not trace:
         return
@@ -289,13 +373,14 @@ def _call_agent(service: Any, query: str, conversation_id: str, filters: Any, st
     if callable(stream_method):
         streamed_text = ""
         final_answer = None
+        final_result = None
         failed = False
         completed = False
         status_context = st.status("Обработка запроса…", expanded=True)
         try:
             events = stream_method(query, conversation_id=conversation_id, filters=filters or None)
             def visible_deltas():
-                nonlocal streamed_text, final_answer, failed, completed, request_id
+                nonlocal streamed_text, final_answer, final_result, failed, completed, request_id
                 for event in events:
                     summary = summarize_event(event)
                     if summary.get("request_id"):
@@ -325,6 +410,7 @@ def _call_agent(service: Any, query: str, conversation_id: str, filters: Any, st
                     elif summary.get("event") == "run_completed":
                         completed = True
                         candidate = event_result(event) or _event_get(event, "answer")
+                        final_result = candidate
                         final_answer = _answer_payload(candidate)
                         if final_answer is None:
                             answer_status = summary.get("answer_status")
@@ -363,6 +449,7 @@ def _call_agent(service: Any, query: str, conversation_id: str, filters: Any, st
             return None
         if final_answer is not None:
             _render_answer(st, final_answer, streamed_text, include_text=not bool(streamed_text))
+            _render_analysis(st, final_result or final_answer)
         elif streamed_text:
             st.warning("Поток завершился без итогового результата; ответ не подтверждён.")
         elif callable(ask_method):
@@ -396,6 +483,7 @@ def _call_ask(service: Any, ask_method: Any, query: str, conversation_id: str,
         st.caption(f"Request ID: {_safe_text(str(request_id), 100)}")
     _render_tool_trace(st, _ask_trace(result))
     _render_answer(st, result)
+    _render_analysis(st, result)
     return {
         "answer": _answer_payload(result),
         "tool_trace": _ask_trace(result),
@@ -444,6 +532,8 @@ def main(
             "Подключите фабрику `src.agent.service.create_agent_service`."
         )
 
+    available_years, available_doc_ids = service_options(service)
+
     state = st.session_state
     if "conversation_id" not in state:
         state.conversation_id = new_conversation_id()
@@ -452,9 +542,9 @@ def main(
 
     with st.sidebar:
         st.subheader("Фильтры документов")
-        years = st.multiselect("Годы", AVAILABLE_YEARS, default=[])
+        years = st.multiselect("Годы", available_years, default=[])
         issuers = st.multiselect("Issuer", AVAILABLE_ISSUERS, default=[])
-        doc_ids = st.multiselect("Документы", AVAILABLE_DOC_IDS, default=[])
+        doc_ids = st.multiselect("Документы", available_doc_ids, default=[])
         if st.button("Новый диалог"):
             state.conversation_id = new_conversation_id()
             state.messages = []

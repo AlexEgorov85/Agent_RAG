@@ -10,6 +10,7 @@ import time
 import uuid
 import inspect
 import re
+from dataclasses import replace
 from queue import Queue
 from threading import Lock, Thread
 from collections.abc import Iterator, Mapping
@@ -23,8 +24,10 @@ from src.agent.state import (
     AgentRunResult,
     Answer,
     Citation,
+    QueryPlan,
 )
 from src.agent.tools import AgentTools
+from src.engine.calculations import format_calculations, summarize_facts
 from src.retrieval.hybrid_retriever import SearchFilters
 
 HISTORY_TURNS = 10
@@ -65,6 +68,15 @@ def _safe_warning(value: Any) -> str:
         "graph_unavailable",
         "issuer_mismatch",
         "retrieval_fallback",
+        "incomplete_period",
+        "structure_unverified",
+        "structure_unavailable",
+        "structure_scope_limited",
+        "structure_content_unverified",
+        "conflicting_values",
+        "unit_mismatch",
+        "query_rewrite_fallback",
+        "query_analysis_fallback",
         "generation_unavailable",
         "citation_validation_failed",
     ):
@@ -88,6 +100,7 @@ def _answer_from(value: Any) -> Answer:
             citations=list(value.citations),
             facts=list(value.facts),
             warnings=[_safe_warning(item) for item in value.warnings],
+            calculations=list(value.calculations),
         )
     citations = []
     for item in _value(value, "citations", []) or []:
@@ -112,6 +125,7 @@ def _answer_from(value: Any) -> Answer:
         citations=citations,
         facts=list(_value(value, "facts", []) or []),
         warnings=[_safe_warning(item) for item in (_value(value, "warnings", []) or [])],
+        calculations=list(_value(value, "calculations", []) or []),
     )
 
 
@@ -133,12 +147,21 @@ class AgentService:
         router: Any = None,
         action_selector: Any = None,
         checkpointer: Any = None,
+        documents_by_year: Mapping[int, list[str]] | None = None,
+        structure_analyzer: Any = None,
+        query_rewriter: Any = None,
     ) -> None:
         self.tools = tools
         self.answerer = answerer
         self.router = router
         self.action_selector = action_selector
         self.checkpointer = checkpointer if checkpointer is not None else InMemorySaver()
+        self.documents_by_year = {
+            int(year): [str(doc_id) for doc_id in docs]
+            for year, docs in (documents_by_year or {}).items()
+        }
+        self.structure_analyzer = structure_analyzer
+        self.query_rewriter = query_rewriter
         self._history_lock = Lock()
         self._conversation_history: dict[str, list[dict[str, str]]] = {}
 
@@ -223,6 +246,19 @@ class AgentService:
                 "warnings": [],
                 "timings": {},
                 "unknown_action_fallback_used": False,
+                "expected_years": [],
+                "covered_years": [],
+                "missing_years": [],
+                "rewritten_queries": [],
+                "search_attempts": [],
+                "available_documents": self.documents_by_year,
+                "structure_documents": {},
+                "structure_snapshots": {},
+                "section_matches": [],
+                "structural_changes": [],
+                "content_changes": [],
+                "structure_comparison_complete": False,
+                "structure_content_checked": False,
             }
             try:
                 graph = build_agent_graph(
@@ -233,6 +269,8 @@ class AgentService:
                     on_event=emit,
                     answer_generator=self._generate_answer,
                     answer_validator=self._valid_answer,
+                    structure_analyzer=self.structure_analyzer,
+                    query_rewriter=self.query_rewriter,
                 )
                 config = {
                     "configurable": {"thread_id": f"{conversation_id}:{request_id}"}
@@ -253,6 +291,15 @@ class AgentService:
                     warnings=list(dict.fromkeys(state.get("warnings", []))),
                     timings=timings,
                     status=status,
+                    structural_changes=list(
+                        state.get("structural_changes", [])
+                    ),
+                    calculations=list(answer.calculations),
+                    retrieval_diagnostics=[
+                        event.diagnostics
+                        for event in state.get("tool_events", [])
+                        if event.diagnostics
+                    ],
                 )
             except Exception:
                 # Не допускаем утечки текста исключений, traceback и тел ответов.
@@ -357,6 +404,21 @@ class AgentService:
                         {"role": item["role"], "content": item["content"]}
                         for item in state.get("history", [])
                     ]
+                plan = state.get("query_plan") or QueryPlan()
+                for key, value in (
+                    ("answer_mode", plan.answer_mode),
+                    (
+                        "structural_changes",
+                        list(state.get("structural_changes", [])),
+                    ),
+                    (
+                        "section_matches",
+                        list(state.get("section_matches", [])),
+                    ),
+                    ("missing_years", list(state.get("missing_years", []))),
+                ):
+                    if supports_kwargs or key in by_name:
+                        kwargs[key] = value
             except (TypeError, ValueError):
                 # Старые/простые callable по-прежнему получают только исходные
                 # три позиционных аргумента.
@@ -388,6 +450,19 @@ class AgentService:
                     "Ответ не прошёл проверку источников.",
                     warnings=["citation_validation_failed"],
                 ), warnings
+
+        if answer.status == "answer":
+            calculations = summarize_facts(answer.facts)
+            if calculations:
+                rendered = format_calculations(calculations)
+                text = answer.answer.rstrip()
+                if rendered:
+                    text = f"{text}\n\n{rendered}" if text else rendered
+                answer = replace(
+                    answer,
+                    answer=text,
+                    calculations=calculations,
+                )
         return answer, warnings
 
     @classmethod

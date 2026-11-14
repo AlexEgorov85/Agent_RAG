@@ -100,6 +100,14 @@ class RetrievalTrace:
     fused_candidates: int = 0
     rerank_candidates: int = 0
     returned: int = 0
+    retrieval_mode: str = "hybrid"
+    query_count: int = 1
+    dense_candidates: int = 0
+    bm25_candidates: int = 0
+    diversity_removed: int = 0
+    distinct_docs: int = 0
+    distinct_sections: int = 0
+    distinct_years: int = 0
     dense_failed: bool = False
     bm25_failed: bool = False
     dense_error_type: str | None = None
@@ -251,7 +259,8 @@ class HybridRetriever:
     def __init__(self, dense_index: Any, bm25_index: Any, embedder: Any, *,
                  reranker: Any = None, candidates: int = DEFAULT_CANDIDATES,
                  rerank_pool: int = DEFAULT_RERANK_POOL,
-                 top_k: int = DEFAULT_TOP_K) -> None:
+                 top_k: int = DEFAULT_TOP_K,
+                 diversity: bool = False) -> None:
         self.dense_index = dense_index
         self.bm25_index = bm25_index
         self.embedder = embedder
@@ -259,49 +268,130 @@ class HybridRetriever:
         self.candidates = candidates
         self.rerank_pool = rerank_pool
         self.top_k = top_k
+        self.diversity = diversity
 
-    def _available_years(self) -> set[int]:
+    @staticmethod
+    def _diversify(
+        selected: list[dict[str, Any]],
+        limit: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Сначала по одному хиту на раздел/документ, затем остальные."""
+        if limit <= 0:
+            return [], len(selected)
+        primary: list[dict[str, Any]] = []
+        rest: list[dict[str, Any]] = []
+        seen_sections: set[str] = set()
+        seen_docs: set[str] = set()
+        for item in selected:
+            chunk = item.get("chunk") if isinstance(item, dict) else None
+            chunk = chunk if isinstance(chunk, Mapping) else item
+            section = _value(chunk, "section_path") or _value(
+                chunk, "breadcrumb_contains"
+            )
+            doc_id = _value(chunk, "doc_id")
+            key = str(section) if section else ""
+            doc_key = str(doc_id) if doc_id else ""
+            if key and key in seen_sections:
+                rest.append(item)
+                continue
+            if doc_key and doc_key in seen_docs and not key:
+                rest.append(item)
+                continue
+            if key:
+                seen_sections.add(key)
+            if doc_key:
+                seen_docs.add(doc_key)
+            primary.append(item)
+        ordered = primary + rest
+        return ordered[:limit], len(rest)
+
+    def _chunks(self) -> list[Mapping[str, Any]]:
         chunks = getattr(self.dense_index, "chunks", None)
         if chunks is None:
             chunks = getattr(self.bm25_index, "chunks", [])
+        return list(chunks or [])
+
+    def _available_years(self) -> set[int]:
         years: set[int] = set()
-        for chunk in chunks or []:
+        for chunk in self._chunks():
             try:
                 years.add(int(_value(chunk, "year")))
             except (TypeError, ValueError):
                 continue
         return years
 
-    def retrieve(self, query: str, *, filters: SearchFilters | None = None,
-                 top_k: int | None = None) -> RetrievalResult:
+    def available_years(self) -> set[int]:
+        """Годы, реально представленные в индексе (без хардкода корпуса)."""
+        return self._available_years()
+
+    def available_doc_ids(self) -> set[str]:
+        """doc_id, реально представленные в индексе."""
+        doc_ids: set[str] = set()
+        for chunk in self._chunks():
+            value = _value(chunk, "doc_id")
+            if isinstance(value, str) and value:
+                doc_ids.add(value)
+        return doc_ids
+
+    def retrieve(
+        self,
+        query: str,
+        *,
+        filters: SearchFilters | None = None,
+        top_k: int | None = None,
+        retrieval_mode: str = "hybrid",
+        use_reranker: bool = True,
+        queries: Sequence[str] | None = None,
+    ) -> RetrievalResult:
         """Возвращает top-k слитых кандидатов и диагностирует отсутствующие годы."""
+        if retrieval_mode not in {"hybrid", "dense", "keyword"}:
+            raise ValueError("invalid retrieval_mode")
         effective = filters or SearchFilters()
         warnings: list[str] = []
         trace = RetrievalTrace()
+        trace.retrieval_mode = retrieval_mode
         eligible = (lambda chunk: _matches(chunk, effective))
 
-        dense_hits: list[Mapping[str, Any]] = []
-        bm25_hits: list[Mapping[str, Any]] = []
-        try:
-            query_vector = self.embedder.embed_query(query)
-            dense_hits = list(self.dense_index.search(
-                query_vector, k=self.candidates, eligible=eligible))
-        except Exception as exc:  # noqa: BLE001 — один канал не должен блокировать базовый поиск
-            trace.dense_failed = True
-            trace.dense_error_type = type(exc).__name__
-            warnings.append(f"Dense retrieval failed ({type(exc).__name__})")
-        try:
-            bm25_hits = list(self.bm25_index.search(
-                query, k=self.candidates, eligible=eligible))
-        except Exception as exc:  # noqa: BLE001
-            trace.bm25_failed = True
-            trace.bm25_error_type = type(exc).__name__
-            warnings.append(f"BM25 retrieval failed ({type(exc).__name__})")
+        query_list = [query]
+        seen_queries = {query.casefold()}
+        for variant in queries or []:
+            if not isinstance(variant, str) or not variant.strip():
+                continue
+            key = variant.casefold()
+            if key not in seen_queries:
+                seen_queries.add(key)
+                query_list.append(variant)
+        trace.query_count = len(query_list)
+
+        rankings: list[tuple[str, list[Mapping[str, Any]]]] = []
+        if retrieval_mode in {"hybrid", "dense"}:
+            try:
+                for variant in query_list:
+                    query_vector = self.embedder.embed_query(variant)
+                    hits = list(self.dense_index.search(
+                        query_vector, k=self.candidates, eligible=eligible))
+                    trace.dense_candidates += len(hits)
+                    rankings.append(("dense", hits))
+            except Exception as exc:  # noqa: BLE001 — один канал не должен блокировать базовый поиск
+                trace.dense_failed = True
+                trace.dense_error_type = type(exc).__name__
+                warnings.append(f"Dense retrieval failed ({type(exc).__name__})")
+        if retrieval_mode in {"hybrid", "keyword"}:
+            try:
+                for variant in query_list:
+                    hits = list(self.bm25_index.search(
+                        variant, k=self.candidates, eligible=eligible))
+                    trace.bm25_candidates += len(hits)
+                    rankings.append(("bm25", hits))
+            except Exception as exc:  # noqa: BLE001
+                trace.bm25_failed = True
+                trace.bm25_error_type = type(exc).__name__
+                warnings.append(f"BM25 retrieval failed ({type(exc).__name__})")
 
         fused: dict[str, dict[str, Any]] = {}
         first_seen: dict[str, int] = {}
         counter = 0
-        for channel, hits in (("dense", dense_hits), ("bm25", bm25_hits)):
+        for channel, hits in rankings:
             seen: set[str] = set()
             for rank, hit in enumerate(hits, start=1):
                 chunk_id = _chunk_id(hit)
@@ -318,8 +408,13 @@ class HybridRetriever:
                     first_seen[chunk_id] = counter
                     counter += 1
                 record = fused[chunk_id]
-                record[f"{channel}_rank"] = rank
-                record[f"{channel}_score"] = float(hit.get("score", 0.0))
+                best_rank = record[f"{channel}_rank"]
+                if best_rank is None or rank < best_rank:
+                    record[f"{channel}_rank"] = rank
+                score = float(hit.get("score", 0.0))
+                best_score = record[f"{channel}_score"]
+                if best_score is None or score > best_score:
+                    record[f"{channel}_score"] = score
                 record["rrf_score"] += 1 / (RRF_CONSTANT + rank)
 
         order = sorted(fused, key=lambda cid: (-fused[cid]["rrf_score"],
@@ -341,7 +436,9 @@ class HybridRetriever:
         trace.rerank_candidates = len(candidates)
 
         selected = candidates
-        if self.reranker is not None and candidates:
+        if not use_reranker:
+            trace.reranker_status = "disabled"
+        elif self.reranker is not None and candidates:
             try:
                 result = self.reranker.rerank(query, candidates)
                 if not hasattr(result, "hits"):
@@ -380,7 +477,11 @@ class HybridRetriever:
             trace.reranker_status = "empty"
 
         limit = self.top_k if top_k is None else int(top_k)
-        selected = selected[:limit]
+        if self.diversity:
+            selected, removed = self._diversify(selected, limit)
+            trace.diversity_removed = removed
+        else:
+            selected = selected[:limit]
         hits: list[RetrievalHit] = []
         for position, item in enumerate(selected, start=1):
             chunk_id = item["chunk_id"]
@@ -401,6 +502,18 @@ class HybridRetriever:
                                      if "rerank_score" in item else None),
             ))
         trace.returned = len(hits)
+        trace.distinct_docs = len({
+            _value(hit.chunk, "doc_id") for hit in hits
+            if _value(hit.chunk, "doc_id") is not None
+        })
+        trace.distinct_sections = len({
+            _value(hit.chunk, "section_path") for hit in hits
+            if _value(hit.chunk, "section_path") is not None
+        })
+        trace.distinct_years = len({
+            _value(hit.chunk, "year") for hit in hits
+            if _value(hit.chunk, "year") is not None
+        })
 
         requested = effective.requested_years()
         missing = sorted(requested - self._available_years())

@@ -10,6 +10,7 @@ from src.ui.app import (
     new_conversation_id,
     normalize_filters,
     safe_tool_arguments,
+    service_options,
     summarize_event,
 )
 from src.ui.citations import citation_metadata, citation_quote
@@ -74,6 +75,20 @@ def test_event_summary_keeps_only_safe_tool_trace_fields() -> None:
         "duration_ms": 18,
         "status": "ok",
     }
+
+
+def test_service_options_are_derived_from_the_index() -> None:
+    backend = SimpleNamespace(
+        available_years=lambda: {2003, 2001, 2002},
+        available_doc_ids=lambda: {"doc-b", "doc-a"},
+    )
+    service = SimpleNamespace(tools=SimpleNamespace(search_backend=backend))
+
+    assert service_options(service) == ((2001, 2002, 2003), ("doc-a", "doc-b"))
+
+
+def test_service_options_are_empty_without_an_index() -> None:
+    assert service_options(None) == ((), ())
 
 
 def test_filter_normalization_and_unique_session_ids() -> None:
