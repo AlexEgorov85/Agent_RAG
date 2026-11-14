@@ -1,0 +1,63 @@
+# =============================================================
+# Sberbank Annual Reports Graph RAG (2015-2024) — зависимости
+# Спецификация: spec_project.md (v3.1), раздел 2
+# =============================================================
+
+# --- Парсинг PDF (layout-aware извлечение текста, таблиц, картинок) ---
+unstructured[all-docs]>=0.15        # partition_pdf, элементы Title/Table/Image
+unstructured-inference>=1.6         # нужен для hi_res (не входит в extras с 0.27!)
+# NOTE: для стратегии hi_res системно нужны:
+#   - poppler  (Windows: `choco install poppler` или добавить в PATH)
+#   - tesseract (Windows: `choco install tesseract`, язык rus в файле langdata)
+
+# --- Agent-фреймворк (курс, Занятия 4/6/7) ---
+langchain>=1.4                       # цепочки, prompt-шаблоны, @tool, create_agent
+langchain-openai>=1.7                # GigaChat через OpenAI-совместимый endpoint
+langgraph>=1.0                       # StateGraph, агентный цикл, InMemorySaver
+
+# --- RAG-фреймворк и Graph RAG ---
+llama-index-core>=0.11              # PropertyGraphIndex, ноды, retrievers
+llama-index-llms-openai>=0.2        # OpenAI-совместимые LLM
+# LLM-провайдер проекта: GigaChat (Cloud.ru Foundation Models)
+#   api_key  = <ключ из Cloud.ru>
+#   base_url = https://foundation-models.api.cloud.ru/v1
+#   model    = GigaChat/GigaChat-3-Pro
+# Подключение: llama_index.llms.openai.OpenAILike(base_url=..., model=...)
+# Тот же endpoint годится и для VLM (vision-модели) при описании графиков.
+
+# --- Поиск (курс, Занятия 3/5) ---
+numpy>=1.26                         # DenseIndex: матрица векторов, косинус
+pandas>=2.1                         # вывод результатов поиска/eval (курсовой код)
+rank-bm25>=0.2.2                    # BM25Okapi (курсовой hybrid search)
+pymorphy3>=2.0                      # русская лемматизация для BM25-tokenize
+
+# --- Граф и хранилища ---
+networkx>=3.1                       # in-memory graph store
+# chromadb>=0.5                     # только если in-memory NumPy DenseIndex не хватает по памяти
+
+# --- Опциональные (альтернативы/сверки; не входят в MVP) ---
+# sentence-transformers>=2.7     # CrossEncoder-реранкер (fallback, если LLM-реранкер не в SLA)
+# ragas>=0.2                     # перекрёстная проверка качества; основной judge — курсовой (Занятие 8)
+# mteb>=2.24                     # краткая проверка эмбеддинг-модели (курс, Занятие 8)
+# datasets>=2.19                 # вспомогательно для MTEB/RAGAS
+
+# --- UI ---
+streamlit>=1.38                     # чат + интерактивный прототип
+streamlit-agraph>=0.0.45            # рендер графа в Streamlit
+
+# --- Eval (курсовой — Занятия 3/8) ---
+# формат dev-вопросов, ranking_metrics и LLM-судья — код курса через Cloud.ru API;
+# отдельные eval-библиотеки — выше в «Опциональных».
+
+# --- Конфигурация и утилиты ---
+pydantic-settings>=2.5              # типизированные конфиги
+python-dotenv>=1.0                  # .env-ключи
+tqdm>=4.66                          # прогресс-бары в ingestion
+
+# --- PDF-обработка нижнего уровня (используется unstructured) ---
+pdf2image>=1.17                     # страницы PDF -> картинки (нужен poppler)
+pytesseract>=0.3.10                 # OCR-обёртка (нужен tesseract)
+pillow>=10.0                        # обработка изображений
+
+# --- Dev-зависимости (тесты) ---
+pytest>=8.0                         # unit/интеграционные тесты (tests/)
