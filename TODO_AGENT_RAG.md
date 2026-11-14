@@ -1,7 +1,11 @@
-# TODO: усиление Agent_RAG
+﻿# TODO: усиление Agent_RAG
 
 **Статус:** рабочий checklist. Архитектура не меняется: один LangGraph-агент,
 `AgentService`, существующие инструменты и retrieval.
+
+**Текущая зона этого агента:** CoverageReport, `required_metrics`, матрица
+«метрика × год». Файлы соседнего Verification-агента
+(`src/agent/verification.py`, `tests/test_verification.py`) не изменяются.
 
 **Источники требований:**
 [spec_agent_enhancement.md](spec_agent_enhancement.md),
@@ -41,207 +45,130 @@ P2 — после базового контура, P3 — полировка.
 
 ---
 
-## 1. CoverageReport и матрица «метрика × год» (P1)
+## 1. CoverageReport и матрица «метрика × год» (P1) — сделано
 
 Цель: отличать **«года нет в корпусе»** от **«год есть, но показатель не найден»**.
 
-- [ ] **C1.** Добавить `src/agent/coverage.py`:
+- [x] **C1.** `src/agent/coverage.py`:
   - `CoverageCell(metric, year, status, chunk_ids)`,
     `status = covered | not_found | year_absent`;
   - `CoverageReport(status, expected_years, covered_years, missing_years, cells)`;
-  - `to_dict()` для `AgentRunResult.diagnostics["coverage"]`.
-- [ ] **C2.** Расширить `QueryPlan` (обратная совместимость, defaults):
-  - `aspects: list[str] = []` (≤ 4 поисковых аспекта);
-  - `required_metrics: list[str] = []` (≤ 5 канонических metric id);
-  - `requires_comparison: bool = False`.
-- [ ] **C3.** Валидация новых полей в `_as_plan`:
-  - списки строк, обрезка до лимитов;
-  - неизвестный metric id отбрасывается, а не ломает весь план.
-- [ ] **C4.** Router:
-  - `SimpleRouter` извлекает metric id из вопроса по словарю
-    (`net_profit`, `revenue`, `roe`, `roa`, `assets`, `capital`, `margin`);
+  - `to_dict()`, `missing_cells()`, `is_covered()`, `is_year_absent()`.
+- [x] **C2.** `QueryPlan` расширен с defaults:
+  `aspects`, `required_metrics`, `requires_comparison`.
+- [x] **C3.** Валидация новых полей в `_as_plan`: списки строк, лимиты,
+  неизвестный metric id отбрасывается.
+- [x] **C4.** Router:
+  - `SimpleRouter` извлекает metric id по словарю;
   - `LLMRouter` принимает/возвращает `aspects`, `required_metrics`,
-    `requires_comparison` и не выдумывает метрики вне словаря.
-- [ ] **C5.** Selector:
-  - после широкого поиска строит `CoverageReport`;
-  - адресные поиски выполняет по недостающим `(metric, year)`, а не только по годам;
-  - не повторяет already attempted `(metric, year)`;
-  - при отсутствии года в корпусе ставит `year_absent`, а не `not_found`.
-- [ ] **C6.** Generator получает `coverage` в `analysis_context` и обязан:
-  - прямо называть отсутствующие годы/показатели;
-  - не подставлять значение соседнего года.
-- [ ] **C7.** Diagnostics: `AgentRunResult.diagnostics["coverage"]` заполняется
-  фактическим отчётом, `None` — только если coverage не применялся.
-- [ ] **C8.** Тесты:
-  - `year_absent` vs `not_found`;
-  - несколько метрик в одном вопросе;
-  - selector ищет только недостающие ячейки;
-  - генератор не интерполирует.
+    `requires_comparison`.
+- [x] **C5.** Selector использует coverage:
+  - широкий поиск → `CoverageReport`;
+  - адресные поиски по недостающим годам;
+  - в запрос добавляются labels required metrics;
+  - `year_absent` не ищется как обычный missing year.
+- [x] **C6.** Generator получает `coverage` в `analysis_context`; промпт различает
+  `not_found`, `year_absent` и запрещает интерполяцию.
+- [x] **C7.** `AgentRunResult.diagnostics["coverage"]` заполняется фактическим
+  отчётом.
+- [x] **C8.** Тесты `tests/test_coverage.py`:
+  `year_absent` vs `not_found`, complete/partial, helpers, serialization.
 
-**Файлы:** `src/agent/coverage.py`, `state.py`, `simple_router.py`,
-`llm_router.py`, `selector.py`, `agent_graph.py`, `generator.py`.
+**Ограничение:** повторный поиск по конкретной паре `(metric, year)` ограничен
+годовым уровнем селектора; отдельный per-metric retry — следующий шаг.
 
 ---
 
-## 2. Verification ответа (P1)
+## 2. Verification ответа (P1) — зона параллельного агента
 
-Цель: проверять не только membership `chunk_id`, но и смысл числовых/причинных
-утверждений.
+> Эти файлы не изменяются текущим Coverage-агентом:
+> `src/agent/verification.py`, `tests/test_verification.py`.
 
-- [ ] **V1.** Добавить `src/agent/verification.py`:
-  - `VerificationIssue(code, severity, message, chunk_ids)`;
-  - `VerificationResult(status, issues)`;
-  - коды: `citation_outside_manifest`, `fact_without_citation`,
-    `fact_value_not_in_source`, `unit_mismatch`, `period_mismatch`,
-    `period_incomplete`, `causal_claim_unsupported`, `structure_unverified`.
-- [ ] **V2.** Проверка чисел:
-  - нормализованный `value` факта должен встречаться в тексте/HTML
-    цитируемого чанка;
-  - `unit`/`scale` не должны противоречить источнику;
-  - `year` факта не подменяется годом чанка.
-- [ ] **V3.** Проверка причинности:
-  - утверждения «потому что / вследствие / из-за» без citation на источник
-    причины помечаются `causal_claim_unsupported`;
-  - при severe-статусе ответ переводится в `abstain` или repair.
-- [ ] **V4.** Интеграция:
-  - `AgentService._generate_answer` вызывает verification после citations/facts;
-  - `AgentRunResult.diagnostics["verification"]` заполняется `to_dict()`;
-  - один repair-цикл, без нового агента.
-- [ ] **V5.** Тесты:
-  - число в ответе не найдено в чанке;
-  - разные единицы;
-  - причинный вывод без источника;
-  - валидный ответ проходит.
-
-**Файлы:** `src/agent/verification.py`, `service.py`, `state.py`,
-`diagnostics`, `tests/test_verification.py`.
+- [~] **V1.** `verification.py`: issues/result, коды проверок.
+- [~] **V2.** Проверка чисел/единиц/года факта по цитируемому чанку.
+- [~] **V3.** Проверка причинных утверждений.
+- [~] **V4.** Интеграция в `AgentService`, `Answer.verification`,
+  `AgentRunResult.diagnostics["verification"]`.
+- [~] **V5.** Тесты verification.
 
 ---
 
 ## 3. Agent-level eval / benchmark (P1–P2)
 
-- [ ] **E1.** Датасет `eval/datasets/`:
-  - `manifest.json` с `dataset_version`, `expected_corpus_sha256`, `suite_hashes`;
-  - `easy.json`, `medium.json`, `hard.json`, `multi_turn.json`;
-  - поля: `id`, `question`, `expected_intent`, `expected_years`,
-    `required_metrics`, `gold_evidence`, `expected_status`, `tags`.
-- [ ] **E2.** `eval/trace.py`: единый `AgentRunResult.diagnostics` без prompt/CoT.
-- [ ] **E3.** `eval/metrics.py`:
-  - retrieval: hit/MRR/recall/nDCG;
-  - behavior: tool sequence, coverage completeness, citation validity,
-    abstain correctness;
-  - temporal accuracy, structure accuracy, calculation correctness.
-- [ ] **E4.** `eval/runner.py` + CLI:
-  - запуск suite, baseline retrieval vs agent;
-  - сохранение JSON/CSV, `summary.capabilities`;
-  - недоступная возможность = `skipped`/`not_measured`, не заглушка.
-- [ ] **E5.** `eval/judge.py`: LLM-судья только после детерминированных метрик;
-  калибровка на 3 контрольных кейсах.
-- [ ] **E6.** `eval/report.py`: Markdown/JSON отчёт с проваленными тестами и
-  ограничениями.
-- [ ] **E7.** Тесты схемы, метрик, runner, lock/manifest.
-
-**Файлы:** `eval/`, `data/eval/`, `scripts/eval_agent.py`, `README.md`.
+- [ ] **E1.** Датасет `eval/datasets/`: manifest, easy/medium/hard/multi_turn.
+- [ ] **E2.** `eval/trace.py`: единый `AgentRunResult.diagnostics`.
+- [ ] **E3.** `eval/metrics.py`: retrieval + behavior + temporal/structure/calculation.
+- [ ] **E4.** `eval/runner.py` + CLI, `summary.capabilities`, JSON/CSV.
+- [ ] **E5.** `eval/judge.py` + калибровка.
+- [ ] **E6.** `eval/report.py`.
+- [ ] **E7.** Тесты схемы, метрик, runner, manifest/lock.
 
 ---
 
 ## 4. Graph retrieval в стандартном контуре (P2)
 
-- [ ] **G1.** Подключить `GraphAugmentedRetriever` в `create_agent_service` как
-  дополнительный канал, если graph artifact существует.
-- [ ] **G2.** Provenance: graph-only chunk попадает в citations только после
-  `get_chunk`/поиска и проверки manifest.
-- [ ] **G3.** Fallback: нет graph index → обычный hybrid + `graph_unavailable`,
-  без падения.
-- [ ] **G4.** Trace: отдельный graph stage (`graph_candidates`, `graph_added`,
-  `graph_failed`).
-- [ ] **G5.** Тесты: graph unavailable, duplicate evidence, provenance violation.
-
-**Файлы:** `factory.py`, `graph_hybrid.py`, `tools.py`, `state.py`.
+- [ ] **G1.** `GraphAugmentedRetriever` в `create_agent_service` как доп. канал.
+- [ ] **G2.** Provenance: graph-only chunk в citations только после проверки.
+- [ ] **G3.** Fallback без graph index.
+- [ ] **G4.** Trace graph stage.
+- [ ] **G5.** Тесты graph unavailable/duplicates/provenance.
 
 ---
 
 ## 5. Retrieval trace stages и context diagnostics (P2)
 
-- [ ] **T1.** `RetrievalTrace.stages` (dense/BM25/graph/RRF/rerank/returned/context)
-  с опциональными списками; при отсутствии данных `available=false`.
-- [ ] **T2.** `PerYearSearch` и `GraphAugmentedRetriever` копируют/дополняют stages.
-- [ ] **T3.** `pack_context` возвращает `context_chunk_ids`; service пишет
-  `diagnostics["context_chunk_ids"]` и `context_source`.
-- [ ] **T4.** UI: отображать стадии, сколько отброшено, какие чанки попали в контекст.
-- [ ] **T5.** Тесты на отсутствие синтетических стадий и на context source.
+- [ ] **T1.** `RetrievalTrace.stages` (dense/BM25/graph/RRF/rerank/context).
+- [ ] **T2.** `PerYearSearch`/`GraphAugmentedRetriever` дополняют stages.
+- [ ] **T3.** `pack_context` → `context_chunk_ids`, `context_source`.
+- [ ] **T4.** UI: стадии и отброшенные чанки.
+- [ ] **T5.** Тесты на отсутствие синтетических стадий.
 
 ---
 
 ## 6. Query planning: aspects и качество rewriting (P2)
 
-- [ ] **Q1.** Использовать `QueryPlan.aspects` в selector: отдельный поиск на
-  аспект (например, «прибыль», «доходы», «расходы») в пределах бюджета.
-- [ ] **Q2.** Оценить rewriting на eval: сколько даёт recall, сколько стоит latency.
-- [ ] **Q3.** Ограничить/кэшировать перефразы; не дублировать запросы.
+- [ ] **Q1.** Использовать `QueryPlan.aspects` для отдельных поисков.
+- [ ] **Q2.** Оценить rewriting на eval (recall/latency).
+- [ ] **Q3.** Кэш/лимиты перефразов.
 - [ ] **Q4.** Тесты на отсутствие новых годов/сумм/сущностей.
 
 ---
 
 ## 7. Полный корпус (P0 для демонстрации)
 
-- [ ] **D1.** Собрать PDF 9 отчётов, проверить реестр источников,
-  `issuer`/`country` для 2015 (БПС-Сбербанк), отсутствие 2021.
-- [ ] **D2.** Пересобрать `elements`, `structure`, `chunks`, embeddings cache.
-- [ ] **D3.** Пересобрать graph index и manifest/provenance.
-- [ ] **D4.** Запустить corpus validation: дубликаты ID, страницы, пустые чанки,
-  HTML-таблицы, source hashes.
-- [ ] **D5.** Прогнать 4 обязательных сценария: factoid, temporal, structural,
-  abstain (2021).
-- [ ] **D6.** Зафиксировать `expected_corpus_sha256` для benchmark.
-
-**Файлы/данные:** `data/raw/`, `data/source_registry.json`, `data/elements/`,
-`data/structure/`, `data/chunks/`, `data/graph/`, `eval/datasets/`.
+- [ ] **D1.** 9 PDF, реестр источников, issuer 2015, отсутствие 2021.
+- [ ] **D2.** Пересобрать elements/structure/chunks/embeddings.
+- [ ] **D3.** Пересобрать graph index и provenance.
+- [ ] **D4.** Corpus validation.
+- [ ] **D5.** 4 обязательных сценария: factoid, temporal, structural, abstain.
+- [ ] **D6.** `expected_corpus_sha256` для benchmark.
 
 ---
 
 ## 8. UI (P2–P3)
 
-- [ ] **U1.** Матрица coverage: metric × year, `covered/not_found/year_absent`.
-- [ ] **U2.** Таблица структурных изменений: год, раздел, тип, evidence.
-- [ ] **U3.** Verification: issues/severity, без traceback и секретов.
-- [ ] **U4.** Diagnostics: retrieval stages, filters, budgets.
-- [ ] **U5.** React/Evaluation WebUI — по
-  `docs/specs/web-ui-modernization.md` и `docs/specs/evaluation-webui.md`;
-  Streamlit остаётся рабочим fallback.
+- [ ] **U1.** Матрица coverage: metric × year.
+- [ ] **U2.** Таблица структурных изменений.
+- [ ] **U3.** Verification issues/severity.
+- [ ] **U4.** Diagnostics: stages, filters, budgets.
+- [ ] **U5.** React/Evaluation WebUI по `docs/specs/*`.
 
 ---
 
 ## 9. Инженерные задачи (P2–P3)
 
-- [ ] **I1.** Вынести бюджеты/лимиты в `RAGSettings`/env:
-  `MAX_TOOL_CALLS`, `MAX_SEARCH_CALLS`, `per_year_k`, `max_years`,
-  `max_structure_docs`, `LLM_ROUTER_ENABLED`, `LLM_REWRITE_ENABLED`,
-  `LLM_STRUCTURE_VERIFY`.
-- [ ] **I2.** Логи: request_id, intent, tool sequence, coverage, duration,
-  без prompt/CoT/секретов.
-- [ ] **I3.** Cost/latency: кэш rewrites, лимит LLM-проверок структуры,
-  отключаемый reranker.
-- [ ] **I4.** README: запуск, флаги, ограничения, benchmark.
+- [ ] **I1.** Лимиты/флаги в `RAGSettings`/env.
+- [ ] **I2.** Логи без prompt/CoT/секретов.
+- [ ] **I3.** Cost/latency: кэш rewrites, лимит LLM-проверок.
+- [ ] **I4.** README.
 - [ ] **I5.** Полный прогон тестов в Python 3.11.
 
 ---
 
-## Рекомендуемый порядок
+## Definition of Done для Coverage-этапа
 
-1. **C1–C8** — CoverageReport + `required_metrics`: закрывает главный разрыв
-   «год есть / показателя нет».
-2. **V1–V5** — verification чисел и причинности.
-3. **E1–E7** — agent-level eval, чтобы измерять эффект, а не обсуждать.
-4. **U1–U4** — показать coverage/verification/structure в UI.
-5. **G1–G5**, **T1–T5**, **Q1–Q4** — graph, stages, aspects.
-6. **D1–D6** — полный корпус для демонстрации.
-7. **I1–I5** — эксплуатационная полировка.
-
-## Definition of Done для следующего этапа
-
-- [ ] Для временного вопроса агент различает «нет года» и «нет метрики».
-- [ ] CoverageReport попадает в `AgentRunResult.diagnostics`.
-- [ ] Селектор делает адресные поиски по недостающим ячейкам, не повторяя их.
-- [ ] Ответ не интерполирует отсутствующие значения.
-- [ ] Есть тесты на оба типа пропусков и на повторный поиск.
+- [x] Для временного вопроса агент различает «нет года» и «нет метрики».
+- [x] CoverageReport попадает в `AgentRunResult.diagnostics`.
+- [x] Ответ не интерполирует отсутствующие значения.
+- [x] Есть тесты на оба типа пропусков.
+- [ ] Отдельный адресный retry по каждой недостающей `(metric, year)`-ячейке.
