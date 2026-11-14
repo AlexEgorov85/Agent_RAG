@@ -1,7 +1,7 @@
 # Evaluation / Benchmark WebUI — Agent_RAG
 
 **Статус:** Proposed
-**Версия:** 1.0
+**Версия:** 1.1
 **Дата:** 14.11.2026
 **Тип изменения:** UI-раздел + Evaluation API
 **Целевая архитектура:** React + TypeScript WebUI, FastAPI adapter, существующий Python Agent_RAG
@@ -14,6 +14,11 @@
 > Это целевой контракт, а не описание уже реализованного. Benchmark-контур описан в
 > `spec_benchmark.md`; React WebUI и общий API — в `web-ui-modernization.md`. Этот
 > документ связывает их и не создаёт вторую реализацию агента.
+>
+> **Иерархия источников истины.** `spec_benchmark.md` — датасет, trace, метрики,
+> артефакты, CLI-runner. `web-ui-modernization.md` — общий React UI и API adapter.
+> Этот документ — только раздел Benchmark в React и Evaluation API.
+> `spec_ui_eval.md` §1 (Streamlit) — исторический контракт и здесь не действует.
 
 ---
 
@@ -67,12 +72,16 @@ Runner — это `eval.runner` из `spec_benchmark.md`. Dashboard — React-р
 |---|---|
 | `summary.json` | Обзор, карточки, история, сравнение |
 | `cases.jsonl` | Список тестов, каталог, сравнение |
-| `traces/{test_id}[.attempt_n].json` | Детализация теста, retrieval trace |
+| `traces/{test_id}.{retrieval_mode}[.attempt_n].json` | Детализация теста, retrieval trace |
 | `retrieval.csv` | Таблица этапов и loss attribution |
 | `report.html` / `report.md` | Отчёт запуска (опционально) |
-| `dataset/*.json` | Определения тестов и gold evidence |
+| `dataset/*.json` + `manifest.json` | Определения тестов, gold evidence, версия корпуса |
 
 UI не создаёт эти артефакты и не пересчитывает их метрики.
+
+Идентичность результата теста — `(run_id, test_id, retrieval_mode, attempt_index)`.
+`attempt_index` относится к повтору конкретной пары `test_id + retrieval_mode`.
+Поэтому `test_id` сам по себе не уникален внутри run'а с `retrieval_mode=all`.
 
 ---
 
@@ -128,6 +137,7 @@ Evaluation
 type EvaluationRunStatus =
   | "queued"
   | "running"
+  | "cancel_requested"
   | "completed"
   | "failed"
   | "cancelled"
@@ -170,6 +180,7 @@ interface EvaluationProgress {
 interface EvaluationVersions {
   git_sha: string;
   git_dirty: boolean;
+  corpus_content_sha256: string;
   corpus_fingerprint: string;
   config_fingerprint: string;
   llm_model: string;
@@ -194,13 +205,13 @@ interface EvaluationError {
 ```typescript
 interface EvaluationTestResult {
   test_id: string;
+  retrieval_mode: "hybrid" | "dense" | "keyword";
   attempt_index: number;
   suite: string;
   category: string;
   difficulty: "easy" | "medium" | "hard";
   status: "completed" | "failed" | "timeout" | "error" | "skipped";
   pass: boolean;
-  retrieval_mode: string;
   metrics: {
     recall_at_5?: number | null;
     recall_at_10?: number | null;
@@ -209,6 +220,7 @@ interface EvaluationTestResult {
     evidence_coverage?: number | null;
     context_coverage?: number | null;
     loss_stage?: string | null;
+    not_measured?: string[];
   };
   answer: {
     automatic_pass?: boolean | null;
@@ -226,16 +238,20 @@ interface EvaluationTestResult {
     llm_calls?: number | null;
     latency_ms?: number;
   };
+  trace_path?: string | null;
   trace_available: boolean;
 }
+
+// Уникальный ключ: run_id + test_id + retrieval_mode + attempt_index.
+// test_id сам по себе не уникален при retrieval_mode="all".
 ```
 
 ### 3.3. Переходы статусов
 
 ```text
 queued → running → completed
+              ├→ cancel_requested → cancelled
               ├→ failed
-              ├→ cancelled
               └→ interrupted
 queued → cancelled
 queued → interrupted
@@ -245,10 +261,37 @@ queued → interrupted
 
 - `completed` не означает, что все тесты прошли; это статус выполнения.
 - `failed` — ошибка runner/окружения, а не провал теста.
+- `cancel_requested` — не терминальный статус: пользователь запросил отмену,
+  worker завершает текущий turn и освобождает LLM-lock.
 - `cancelled` — отменено пользователем; частичные результаты сохраняются.
 - `interrupted` — API перезапущен во время выполнения; UI не показывает вечный
   spinner и предлагает повторить.
 - Переходы назад запрещены.
+- Если worker не смог остановиться за per-turn timeout, run переходит в `failed` с
+  `error.code=cancel_timeout`; зависший `cancel_requested` запрещён.
+
+### 3.4. Независимость статусов
+
+Четыре уровня статусов не выводятся один из другого:
+
+| Уровень | Где | Значения |
+|---|---|---|
+| Agent execution | `AgentRunResult.status` | `completed` / `abstained` / `failed` |
+| Answer | `Answer.status` | `answer` / `abstain` |
+| Test result | `cases.jsonl`, `EvaluationTestResult.status` | `completed` / `failed` / `timeout` / `error` / `skipped` |
+| Evaluation run | `EvaluationRun.status` | `queued` / `running` / `cancel_requested` / `completed` / `failed` / `cancelled` / `interrupted` |
+
+Правила:
+
+- `abstained` — успешное выполнение агента; UI не показывает его как `failed` или
+  ошибку benchmark.
+- `Answer.status=abstain` — штатный ответ; тест проходит, если
+  `expected_status=abstain`.
+- Run `completed` может содержать проваленные тесты: это разные уровни.
+- `unsupported_mode`/`invalid_dataset`/`judge_error` — причины и коды, а не статусы
+  теста; mapping определён в `spec_benchmark.md` §5.9.
+- Полные правила прохождения и denominator — `spec_benchmark.md` §5.9–§5.10; этот
+  документ их не переопределяет.
 
 ---
 
@@ -260,7 +303,7 @@ queued → interrupted
 
 | Карточка | Значение | Источник |
 |---|---|---|
-| Успешные тесты | `passed / total` и pass rate | `summary.pass_at_1` / `summary.coverage` |
+| Успешные тесты | `passed / eligible` и `pass_rate`; рядом `execution_coverage` | `summary.coverage`, `summary.pass_rate`, `summary.execution_coverage` |
 | Recall@10 | macro mean | `summary.groups.retrieval.recall_at_10` |
 | Качество ответов | `8.2 / 10` rubric mean, если есть judge/manual; иначе automatic pass rate с явной подписью | `summary.groups.answer.rubric_mean` или `automatic_pass_rate` |
 | Multi-turn | scenario success rate | `summary.groups.dialogue.scenario_success_rate` |
@@ -268,8 +311,12 @@ queued → interrupted
 Требования:
 
 - не показывать `0`, если метрика не измерялась; показывать `—`;
-- рядом с каждой карточкой — дельта к предыдущему завершённому запуску с тем же
+- pass rate всегда сопровождается coverage: `18/20 eligible · 20/30 executed` — это
+  разные числа, и оба обязаны быть видны;
+- рядом с каждой карточкой — дельта к предыдущему сопоставимому запуску с тем же
   suite/split: `▲ +2.1 п.п.`, `▼ −1.4 п.п.` или `—`;
+- дельта показывается только при сопоставимости по §7.4; иначе `—` и ссылка на
+  side-by-side;
 - если предыдущего сопоставимого запуска нет, дельта отсутствует, а не сравнивается
   с другим набором;
 - не сворачивать четыре карточки в один `Agent Quality`;
@@ -279,17 +326,18 @@ queued → interrupted
 
 Таблица:
 
-| Дата | Набор | Режим | Результат | Длительность | Статус |
-|---|---|---|---|---|---|
-| 14.11 | Smoke | hybrid | 90% | 4 мин | completed |
-| 12.11 | Full | hybrid | 87% | 38 мин | completed |
-| 09.11 | Full | dense | 83% | 35 мин | completed |
+| Дата | Набор | Режим | Результат | Coverage | Длительность | Статус |
+|---|---|---|---|---|---|---|
+| 14.11 | Smoke | hybrid | 90% (9/10) | 10/12 | 4 мин | completed |
+| 12.11 | Full | hybrid | 87% (26/30) | 30/30 | 38 мин | completed |
+| 09.11 | Full | dense | 83% (25/30) | 30/30 | 35 мин | completed |
 
 Правила:
 
 - сортировка по `created_at` убыванию;
-- статус `running` показывает progress;
+- статус `running`/`cancel_requested` показывает progress;
 - `failed`/`interrupted` не маскируются процентом;
+- `pass_rate` не показывается без `execution_coverage`;
 - клик открывает карточку запуска.
 
 ### 4.3. Качество по направлениям
@@ -375,6 +423,8 @@ Dialogue        80%
 - при активном запуске кнопки запуска disabled с объяснением;
 - очередь ограничена; при переполнении — понятная ошибка `queue_full`;
 - повторный клик с тем же `client_request_id` не создаёт второй запуск;
+- `retrieval_mode=all` создаёт отдельный результат и отдельный trace на каждый режим;
+  UI не схлопывает `hybrid`/`dense`/`keyword` в одну строку;
 - форма не позволяет выбрать несуществующий suite.
 
 ### 5.2. История запусков
@@ -397,8 +447,11 @@ Dialogue        80%
 
 - статус и progress;
 - suite/split/mode/judge/repeat;
-- версии: git SHA + dirty, dataset hash/version, corpus fingerprint, model;
-- сводку четырёх групп;
+- версии: git SHA + dirty, dataset hash/version, corpus content hash, corpus fingerprint,
+  model;
+- сводку четырёх групп и coverage (eligible/selected/executed);
+- предупреждение, если часть возможностей (`capabilities`) недоступна и метрики
+  помечены `not_measured`;
 - список problem tests;
 - ссылки: «Открыть отчёт», «Открыть тесты», «Сравнить с предыдущим»;
 - ошибку, если запуск failed;
@@ -416,7 +469,8 @@ Dialogue        80%
 UI:
 
 - сразу показывает запуск в списке;
-- опрашивает `GET /runs/{id}` каждые 2 секунды, пока статус `queued`/`running`;
+- опрашивает `GET /runs/{id}` каждые 2 секунды, пока статус `queued`/`running`/
+  `cancel_requested`;
 - при ошибке polling — backoff и честный статус;
 - после терминального статуса загружает summary и tests;
 - SSE-обновления — опциональная capability, не обязательны в первой версии.
@@ -428,7 +482,8 @@ UI:
 ### 6.1. Каталог
 
 Источник — `eval/datasets/*.json`; последний статус — из последнего завершённого
-запуска.
+запуска. Если запуск использовал несколько режимов, каталог показывает статус по
+выбранному режиму (по умолчанию `hybrid`) и не смешивает режимы в одной ячейке.
 
 Фильтры:
 
@@ -449,7 +504,8 @@ critical errors, последний запуск.
 
 Секции:
 
-1. **Заголовок** — test_id, статус, difficulty, category, suite, запуск, attempt.
+1. **Заголовок** — test_id, retrieval mode, attempt, статус, difficulty, category,
+   suite, запуск.
 2. **Вопрос и эталон** — вопрос, expected status, expected facts/years/documents,
    reference answer (если есть).
 3. **Query Plan** — intent, years, metrics/aspects, needs_graph, answer_mode,
@@ -506,9 +562,12 @@ Diagnostics: evidence за 2021 отсутствует; ответ не назв
 
 ### 6.3. История теста
 
-Для выбранного test_id показывается история по завершённым запускам:
+Для выбранного `test_id` показывается история по завершённым запускам. Если запуск
+использовал `retrieval_mode=all`, история группируется по режиму, а не смешивает
+`hybrid`/`dense`/`keyword` в одной точке:
 
 - дата/run_id;
+- retrieval mode;
 - pass/fail;
 - Recall@k;
 - Evidence Coverage;
@@ -563,11 +622,26 @@ Diagnostics: evidence за 2021 отсутствует; ответ не назв
 
 ### 7.4. Сопоставимость
 
-Сравнение допустимо, если:
+Правила совпадают с `spec_benchmark.md` §8.3; UI не вводит своих условий.
 
-- совпадает `dataset.sha256`;
-- совпадает набор тестов и split;
-- известны версии/конфиги обоих запусков.
+Полное сравнение с дельтами разрешено, когда совпадают:
+
+- `dataset.sha256`;
+- набор тестов и split;
+- `corpus.content_sha256` (`dataset.expected_corpus_sha256`).
+
+Разрешено, но показывается как различие версий:
+
+- разный git SHA / `dirty`;
+- другая LLM/reranker/judge-модель;
+- другой retrieval config (`mode`, `top_k`, `rerank_pool`, `graph`);
+- другой `corpus.index_fingerprint` при том же content hash (переиндексация).
+
+Запрещает дельты (`not_comparable`, только side-by-side):
+
+- разный `dataset.sha256`;
+- разный `corpus.content_sha256`;
+- разный набор тестов или split.
 
 Иначе:
 
@@ -575,7 +649,8 @@ Diagnostics: evidence за 2021 отсутствует; ответ не назв
 - причины перечислены;
 - side-by-side просмотр разрешён, но дельты и «регрессии» не выдаются как
   надёжный вывод;
-- UI не скрывает различие версий.
+- UI не скрывает различие версий и не называет изменением агента то, что изменило
+  эталонную базу.
 
 ---
 
@@ -590,6 +665,8 @@ Diagnostics: evidence за 2021 отсутствует; ответ не назв
 - evaluation endpoints не доступны обычному чату и не смешиваются с `/api/research`;
 - API не запускает LLM в request handler;
 - API не пересчитывает метрики: читает `summary.json`/`cases.jsonl`/trace;
+- результат теста адресуется `(test_id, retrieval_mode, attempt_index)`; endpoint
+  одного результата не угадывает режим;
 - trace не встраивается в список; только по отдельному запросу;
 - секреты, prompt и полный текст корпуса не возвращаются.
 
@@ -686,12 +763,17 @@ Diagnostics: evidence за 2021 отсутствует; ответ не назв
       "created_at": "2026-11-14T12:00:00Z",
       "finished_at": "2026-11-14T12:04:00Z",
       "pass_rate": 0.9,
+      "execution_coverage": 1.0,
       "tests_total": 12,
-      "tests_passed": 11,
+      "tests_eligible": 10,
+      "tests_executed": 12,
+      "tests_passed": 9,
+      "tests_skipped": 2,
       "duration_ms": 240000,
       "git_sha": "f77652a",
       "git_dirty": false,
-      "dataset_sha256": "..."
+      "dataset_sha256": "...",
+      "corpus_content_sha256": "..."
     }
   ],
   "total": 3,
@@ -738,6 +820,7 @@ Diagnostics: evidence за 2021 отсутствует; ответ не назв
   "items": [
     {
       "test_id": "hard_002",
+      "retrieval_mode": "dense",
       "attempt_index": 0,
       "suite": "hard",
       "category": "temporal",
@@ -764,7 +847,15 @@ Diagnostics: evidence за 2021 отсутствует; ответ не назв
 
 ### 8.7. Детализация теста
 
-`GET /api/evaluation/runs/{id}/tests/{test_id}`
+`GET /api/evaluation/runs/{id}/tests/{test_id}?retrieval_mode=hybrid&attempt_index=0`
+
+`test_id` не уникален, если run выполнялся с `retrieval_mode=all`. Поэтому:
+
+- `retrieval_mode` и `attempt_index` — явные query-параметры;
+- `attempt_index` по умолчанию 0;
+- если `retrieval_mode` не задан и у теста есть результаты в нескольких режимах,
+  API возвращает `409 ambiguous_test_result` со списком `available_modes`;
+- `retrieval_mode=all` в этом endpoint недопустим → `422 invalid_retrieval_mode`.
 
 ```json
 {
@@ -777,6 +868,8 @@ Diagnostics: evidence за 2021 отсутствует; ответ не назв
     "expected": {},
     "gold_evidence": {}
   },
+  "retrieval_mode": "dense",
+  "attempt_index": 0,
   "result": {},
   "query_plan": {},
   "retrieval_calls": [],
@@ -796,7 +889,7 @@ Diagnostics: evidence за 2021 отсутствует; ответ не назв
     "likely_cause": "retrieval",
     "notes": []
   },
-  "trace_url": "/api/evaluation/runs/.../tests/hard_002/trace"
+  "trace_url": "/api/evaluation/runs/.../tests/hard_002/trace?retrieval_mode=dense&attempt_index=0"
 }
 ```
 
@@ -805,13 +898,16 @@ Diagnostics: evidence за 2021 отсутствует; ответ не назв
 - `gold_evidence` и expected facts доступны только в Evaluation API, не в чате;
 - если trace отсутствует, `trace_url=null` и `trace_available=false`;
 - `diagnostics.likely_cause` — из evaluator, не вычисляется frontend;
+- поля `query_plan`, `retrieval_calls`, `evidence` — flatten
+  `AgentRunResult.diagnostics`; API не создаёт альтернативную диагностику;
 - `answer` может содержать текст и citations; полный контекст — только trace endpoint.
 
 ### 8.8. Trace
 
-`GET /api/evaluation/runs/{id}/tests/{test_id}/trace`
+`GET /api/evaluation/runs/{id}/tests/{test_id}/trace?retrieval_mode=hybrid&attempt_index=0`
 
-Возвращает trace из `spec_benchmark.md` §4.1. Ограничения:
+Параметры и правило `ambiguous_test_result` те же, что в §8.7. Возвращает trace из
+`spec_benchmark.md` §4.1. Ограничения:
 
 - без prompt, chain-of-thought, ключей и полного текста корпуса;
 - размер ограничен; при обрезке `truncated=true`;
@@ -830,8 +926,18 @@ endpoint отключён, UI строит отчёт из `summary`/`tests`.
 {
   "comparable": true,
   "reasons": [],
-  "base": {"id": "...", "git_sha": "...", "dataset_sha256": "..."},
-  "candidate": {"id": "...", "git_sha": "...", "dataset_sha256": "..."},
+  "base": {
+    "id": "...",
+    "git_sha": "...",
+    "dataset_sha256": "...",
+    "corpus_content_sha256": "..."
+  },
+  "candidate": {
+    "id": "...",
+    "git_sha": "...",
+    "dataset_sha256": "...",
+    "corpus_content_sha256": "..."
+  },
   "metrics": [
     {"key": "pass_rate", "base": 0.83, "candidate": 0.87, "delta": 0.04},
     {"key": "recall_at_10", "base": 0.82, "candidate": 0.91, "delta": 0.09}
@@ -844,7 +950,11 @@ endpoint отключён, UI строит отчёт из `summary`/`tests`.
 }
 ```
 
-- разные `dataset.sha256` → `comparable=false` + reasons; HTTP 200;
+- разные `dataset.sha256` или `corpus.content_sha256` → `comparable=false` + reasons;
+  HTTP 200;
+- разный набор тестов/split → `comparable=false`;
+- разный git SHA, модель или retrieval config → `comparable=true`, различия в
+  `reasons`/`versions`, дельты разрешены;
 - отсутствующий run → 404;
 - незавершённый run → 409 `run_not_finished`;
 - метрики `null` не превращаются в ноль;
@@ -852,7 +962,7 @@ endpoint отключён, UI строит отчёт из `summary`/`tests`.
 
 ### 8.10. Каталог тестов
 
-`GET /api/evaluation/tests?difficulty=hard&status=failed&q=прибыль&limit=50`
+`GET /api/evaluation/tests?difficulty=hard&status=failed&q=прибыль&retrieval_mode=hybrid&limit=50`
 
 ```json
 {
@@ -865,6 +975,7 @@ endpoint отключён, UI строит отчёт из `summary`/`tests`.
       "question": "Сравни чистую прибыль за 2020–2024 годы.",
       "last_run": {
         "run_id": "...",
+        "retrieval_mode": "hybrid",
         "pass": false,
         "status": "completed",
         "critical_errors": []
@@ -886,6 +997,8 @@ endpoint отключён, UI строит отчёт из `summary`/`tests`.
 | `evaluation_disabled` | 404 | раздел отключён конфигурацией |
 | `run_not_found` | 404 | неизвестный run_id |
 | `test_not_found` | 404 | неизвестный test_id |
+| `ambiguous_test_result` | 409 | у test_id несколько режимов, `retrieval_mode` не указан |
+| `invalid_retrieval_mode` | 422 | `retrieval_mode=all` в endpoint одного результата |
 | `run_not_finished` | 409 | сравнение/детали недоступны до завершения |
 | `run_in_progress` | 409 | очередь отключена и уже есть активный запуск |
 | `queue_full` | 429 | очередь benchmark заполнена |
@@ -897,6 +1010,8 @@ endpoint отключён, UI строит отчёт из `summary`/`tests`.
 | `holdout_confirmation_required` | 422 | нет `confirm_holdout` |
 | `not_comparable` | 200 | сравнение с `comparable=false` |
 | `cancel_not_supported` | 409 | отмена недоступна |
+| `llm_busy` | 503 | другой процесс удерживает `LLMExecutionLock` |
+| `llm_lock_unavailable` | 503 | файловая система не поддерживает эксклюзивный lock |
 | `internal_error` | 500 | ошибка без traceback |
 
 ---
@@ -908,7 +1023,8 @@ endpoint отключён, UI строит отчёт из `summary`/`tests`.
 - Run creation только создаёт запись и ставит задачу.
 - Worker — один фоновый исполнитель (`ThreadPoolExecutor(max_workers=1)` или
   эквивалент), без Celery/Redis.
-- Worker вызывает `eval.runner.run_suite(...)`, а не копию benchmark.
+- Worker вызывает `eval.runner.run_suite(..., llm_lock=LLMExecutionLock(...))`, а не
+  копию benchmark.
 - Между тестами и turn'ами worker обновляет progress в store.
 - По завершении импортирует `summary.json`/`cases.jsonl` в БД и фиксирует
   `artifacts_dir`.
@@ -940,17 +1056,57 @@ endpoint отключён, UI строит отчёт из `summary`/`tests`.
 Если backend/provider поддерживает изолированные квоты, политику можно
 пересмотреть отдельным решением; в первой версии — строгая сериализация.
 
-CLI-запуск `eval.runner` не проходит через API-очередь. В local-режиме нельзя
-одновременно запускать CLI benchmark и активный чат через API; оператор обязан
-использовать один путь. UI-запуск всегда идёт через общую очередь.
+#### Межпроцессная сериализация
+
+`ExecutionGate` внутри API-процесса не защищает от CLI-runner'а: это два разных
+процесса. Поэтому запрет одновременной работы должен быть техническим, а не
+инструкцией оператору.
+
+Механизм — `LLMExecutionLock`: эксклюзивный межпроцессный файловый lock
+(`data/evaluation/llm.lock`, путь настраивается `LLM_LOCK_PATH`). Его берут **оба**
+пути:
+
+| Путь | Что удерживает lock |
+|---|---|
+| API chat | один `AgentService.ask()` / `stream()` запрос |
+| API evaluation worker | один turn benchmark-теста |
+| CLI `eval.runner` | один turn benchmark-теста |
+| `scripts/eval_*`, вызывающие LLM | один вызов или один тест; тот же lock |
+
+Правила:
+
+- lock берётся перед первым LLM-вызовом turn'а и освобождается после завершения
+  turn'а; benchmark не удерживает его на весь suite;
+- reranker, router-LLM и judge входят в тот же turn и покрыты тем же lock'ом;
+- между turn'ами benchmark делает yield (`EVAL_YIELD_MS`) и проверяет маркер
+  `llm.chat_waiting`; если чат ждёт, benchmark приостанавливается;
+- chat имеет приоритет и ждёт максимум один benchmark-turn;
+- benchmark не запускает тесты параллельно;
+- lock-файл содержит `pid`, `kind` (`chat|evaluation|cli`), `run_id`, `test_id`,
+  `acquired_at`, `heartbeat_at`; секретов и prompt в нём нет;
+- heartbeat обновляется, пока turn выполняется. Lock с мёртвым PID или устаревшим
+  heartbeat (`LLM_LOCK_STALE_S`) считается брошенным и снимается с warning
+  `stale_llm_lock_recovered`;
+- если lock не взят за `LLM_LOCK_TIMEOUT_S`, CLI завершается кодом 5 (`llm_busy`),
+  evaluation API возвращает `503 llm_busy`, chat ждёт;
+- если файловая система не поддерживает эксклюзивные lock'и, запуск завершается
+  `llm_lock_unavailable`; молчаливый параллельный вызов запрещён;
+- API, который просто запущен и простаивает, не блокирует CLI: важен факт удержания
+  lock'а, а не существование процесса.
+
+Это не очередь и не планировщик: тот же `ThreadPoolExecutor(max_workers=1)` остаётся
+достаточным внутри API.
 
 ### 9.3. Отмена
 
 - `POST /runs/{id}/cancel`:
   - `queued` → сразу `cancelled`;
   - `running` → `cancel_requested`, runner завершает текущий turn и
-    останавливается;
-  - `completed`/`failed` → `409 cancel_not_supported`.
+    останавливается, после чего run становится `cancelled`;
+  - `completed`/`failed`/`cancelled` → `409 cancel_not_supported`.
+- Если worker не остановился за per-turn timeout, run становится `failed` с
+  `error.code=cancel_timeout`; `cancel_requested` не остаётся навсегда.
+- `cancel_requested` — не терминальный статус и не показывается как завершённый.
 - Частичные результаты сохраняются.
 - Отмена не удаляет уже записанные traces.
 - UI показывает «Останавливается…» до терминального статуса.
@@ -959,7 +1115,7 @@ CLI-запуск `eval.runner` не проходит через API-очеред
 
 При старте:
 
-- все `queued`/`running` записи помечаются `interrupted`;
+- все `queued`/`running`/`cancel_requested` записи помечаются `interrupted`;
 - `interrupted` не выдаётся за `completed`;
 - UI показывает причину и кнопку «Повторить»;
 - артефакты, если есть, остаются доступными для просмотра.
@@ -982,7 +1138,8 @@ Evaluation storage отделён от истории пользовательс
 
 ```text
 data/evaluation/
-└── evaluation.sqlite3
+├── evaluation.sqlite3
+└── llm.lock                # межпроцессный LLMExecutionLock
 
 eval/results/{run_id}/          # канонические артефакты runner'а
 ├── summary.json
@@ -1013,6 +1170,7 @@ CREATE TABLE evaluation_runs (
   finished_at TEXT,
   progress_json TEXT,
   dataset_sha256 TEXT,
+  corpus_content_sha256 TEXT,
   git_sha TEXT,
   config_json TEXT,
   summary_json TEXT,
@@ -1023,6 +1181,7 @@ CREATE TABLE evaluation_runs (
 CREATE TABLE evaluation_test_results (
   run_id TEXT NOT NULL REFERENCES evaluation_runs(id) ON DELETE CASCADE,
   test_id TEXT NOT NULL,
+  retrieval_mode TEXT NOT NULL,
   attempt_index INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL,
   pass INTEGER NOT NULL,
@@ -1030,18 +1189,23 @@ CREATE TABLE evaluation_test_results (
   critical_json TEXT,
   trace_path TEXT,
   duration_ms REAL,
-  PRIMARY KEY (run_id, test_id, attempt_index)
+  PRIMARY KEY (run_id, test_id, retrieval_mode, attempt_index)
 );
 
 CREATE INDEX ix_eval_runs_created
   ON evaluation_runs(created_at DESC);
 
 CREATE INDEX ix_eval_results_failed
-  ON evaluation_test_results(run_id, pass);
+  ON evaluation_test_results(run_id, retrieval_mode, pass);
 ```
 
 Правила:
 
+- `attempt_index` относится к повтору конкретной пары `test_id + retrieval_mode`;
+- `retrieval_mode` обязателен в ключе: при `retrieval_mode=all` один `test_id` даёт
+  три строки, и они не должны конфликтовать;
+- `trace_path` — относительный путь
+  `traces/{test_id}.{retrieval_mode}[.attempt_n].json`;
 - SQLite WAL, `PRAGMA foreign_keys=ON`, миграции при старте, без ORM;
 - полный trace/HTML не дублируются в БД;
 - удаление run каскадно удаляет результаты и (опционально) artifacts по retention;
@@ -1052,8 +1216,11 @@ CREATE INDEX ix_eval_results_failed
 ### 10.3. Импорт результатов
 
 - После завершения worker читает `summary.json`/`cases.jsonl`.
-- `cases.jsonl` → `evaluation_test_results`.
-- `summary.json` → `evaluation_runs.summary_json`.
+- `cases.jsonl` → `evaluation_test_results`, ключ
+  `(run_id, test_id, retrieval_mode, attempt_index)`. Повторный импорт обновляет
+  строку, а не создаёт дубль.
+- `summary.json` → `evaluation_runs.summary_json`, `dataset_sha256` и
+  `corpus_content_sha256`.
 - Ошибка импорта → `failed(artifact_import_error)`, artifacts сохраняются.
 
 ---
@@ -1066,7 +1233,8 @@ CREATE INDEX ix_eval_results_failed
 |---|---|
 | Git SHA + dirty | runner summary |
 | Dataset version/hash | runner summary |
-| Corpus fingerprint | runner summary |
+| Corpus content hash | runner summary (`dataset.expected_corpus_sha256`) |
+| Corpus index fingerprint | runner summary (`corpus.index_fingerprint`) |
 | Retrieval mode/top_k | runner summary |
 | LLM/reranker/judge model | runner summary |
 | Prompt hashes | runner summary |
@@ -1074,9 +1242,13 @@ CREATE INDEX ix_eval_results_failed
 
 Требования:
 
-- сравнение разных dataset hash → `not_comparable`;
+- полное сравнение с дельтами — только при совпадении `dataset.sha256`, набора
+  тестов, split и `corpus.content_sha256`; иначе `not_comparable` и side-by-side;
 - разный git SHA не блокирует сравнение, но показывается как версия;
-- разный corpus fingerprint — отдельное предупреждение;
+- другая модель или retrieval config не блокируют сравнение — это как раз то, что мы
+  измеряем; различия показываются рядом с дельтами;
+- разный `corpus.index_fingerprint` при том же content hash — переиндексация, а не
+  другой корпус; это видно, но не запрещает дельты;
 - UI не скрывает `dirty=true`;
 - нельзя подменять версию «последней» без отображения.
 
@@ -1107,6 +1279,9 @@ CREATE INDEX ix_eval_results_failed
 | `EVAL_MAX_CONCURRENCY` | `1` | В первой версии только 1 |
 | `EVAL_QUEUE_SIZE` | `3` | Максимум ожидающих запусков |
 | `EVAL_YIELD_MS` | `250` | Пауза между turn'ами/тестами для chat |
+| `LLM_LOCK_PATH` | `data/evaluation/llm.lock` | Общий межпроцессный LLM-lock (API + CLI) |
+| `LLM_LOCK_TIMEOUT_S` | `900` | Сколько ждать lock перед `llm_busy` |
+| `LLM_LOCK_STALE_S` | `120` | Возраст heartbeat, после которого lock считается брошенным |
 | `EVAL_RETENTION_RUNS` | `50` | Сколько завершённых run'ов хранить |
 | `EVAL_TURN_TIMEOUT_S` | `300` | Таймаут одного turn'а |
 | `EVAL_RUN_TIMEOUT_S` | `7200` | Таймаут всего запуска |
@@ -1157,8 +1332,9 @@ CREATE INDEX ix_eval_results_failed
 
 - [ ] **AC-E07.** `POST /runs` возвращает `202` и `run_id`; benchmark не
   выполняется в HTTP-запросе.
-- [ ] **AC-E08.** UI показывает `queued → running → completed/failed/cancelled`
-  и progress без вечного spinner.
+- [ ] **AC-E08.** UI показывает `queued → running → cancel_requested →
+  completed/failed/cancelled` и progress без вечного spinner; `interrupted` виден
+  после рестарта API.
 - [ ] **AC-E09.** Smoke и Full запускаются; holdout требует явного подтверждения;
   smoke не включает holdout.
 - [ ] **AC-E10.** Повторный запуск при активном benchmark не создаёт второй
@@ -1185,22 +1361,24 @@ CREATE INDEX ix_eval_results_failed
 
 - [ ] **AC-E18.** Сравнение двух запусков показывает метрики, дельты, улучшения
   и регрессии; ухудшения не скрываются.
-- [ ] **AC-E19.** Разные `dataset.sha256` дают `comparable=false` с причинами;
-  side-by-side разрешён, но дельты не выдаются как надёжные.
+- [ ] **AC-E19.** Разные `dataset.sha256` или `corpus.content_sha256` дают
+  `comparable=false` с причинами; side-by-side разрешён, но дельты не выдаются как
+  надёжные. Разный git SHA/модель/config дельты не блокирует.
 - [ ] **AC-E20.** Изменения статусов тестов (`pass→fail`, `fail→pass`) видны
   списком и фильтруются.
 
 ### Архитектура и безопасность
 
 - [ ] **AC-E21.** Runner вызывает тот же `AgentService`; второй копии агента нет.
-- [ ] **AC-E22.** Все вызовы LLM сериализованы через `ExecutionGate`; benchmark
-  и чат не конкурируют; benchmark удерживает gate не дольше одного turn.
+- [ ] **AC-E22.** Все вызовы LLM сериализованы через `ExecutionGate` внутри API и
+  `LLMExecutionLock` между API и CLI; benchmark и чат не конкурируют; benchmark
+  удерживает lock не дольше одного turn.
 - [ ] **AC-E23.** Evaluation storage отделён от истории чата; полные traces
   лежат на диске, БД хранит индекс/summary.
 - [ ] **AC-E24.** При перезапуске API `running` → `interrupted`; UI не показывает
   завершённый результат.
-- [ ] **AC-E25.** Версии (git SHA/dirty, dataset hash, corpus fingerprint, model,
-  prompt hashes) видны в карточке и сравнении.
+- [ ] **AC-E25.** Версии (git SHA/dirty, dataset hash, corpus content hash, corpus
+  fingerprint, model, prompt hashes) видны в карточке и сравнении.
 - [ ] **AC-E26.** Evaluation endpoints защищены: local owner или роль `evaluator`;
   чужой run недоступен.
 - [ ] **AC-E27.** В API/UI/логах нет секретов, prompt и полного текста корпуса.
@@ -1210,6 +1388,23 @@ CREATE INDEX ix_eval_results_failed
 - [ ] **AC-E30.** Offline contract/component/E2E-тесты проходят на fixtures без
   сети и LLM.
 
+### Контракты и согласованность
+
+- [ ] **AC-E31.** Результат теста адресуется `(run_id, test_id, retrieval_mode,
+  attempt_index)`; при `retrieval_mode=all` три режима дают три строки БД и три
+  trace-файла без перезаписи.
+- [ ] **AC-E32.** `EvaluationRunStatus` включает `cancel_requested`; переходы
+  `running → cancel_requested → cancelled` и `queued/running → interrupted`
+  реализованы; `abstained` не отображается как ошибка.
+- [ ] **AC-E33.** CLI и API используют один `LLMExecutionLock`; параллельный вызов
+  LLM из двух процессов технически невозможен, а не запрещён инструкцией.
+- [ ] **AC-E34.** Сопоставимость в UI и API совпадает с `spec_benchmark.md` §8.3;
+  разный content hash корпуса даёт `not_comparable`.
+- [ ] **AC-E35.** Pass rate показывается вместе с execution coverage; eligible,
+  selected, executed, skipped и errors не смешиваются.
+- [ ] **AC-E36.** Endpoint детализации и trace требуют `retrieval_mode` при
+  неоднозначности и возвращают `ambiguous_test_result`, а не первый попавшийся режим.
+
 ---
 
 ## 15. Тестовая матрица
@@ -1217,9 +1412,11 @@ CREATE INDEX ix_eval_results_failed
 | Уровень | Что проверяется | Где | Блокирует merge |
 |---|---|---|---|
 | API contract | POST/GET схемы, коды, пагинация, idempotency | `tests/api/test_evaluation_api.py` | да |
-| Store | runs/results, WAL, cascade, interrupted, retention | `tests/api/test_evaluation_store.py` | да |
+| Store | runs/results, WAL, cascade, interrupted, retention, составной ключ с режимом | `tests/api/test_evaluation_store.py` | да |
 | Worker | queue, один running, progress, cancel, artifact import | `tests/api/test_evaluation_worker.py` | да |
 | Gate | chat priority, один LLM-call, yield между turn'ами | `tests/api/test_execution_gate.py` | да |
+| Cross-process lock | CLI + API не вызывают LLM одновременно, stale lock | `tests/api/test_llm_lock.py` | да |
+| Result identity | режимы, attempts, trace paths, `ambiguous_test_result` | `tests/api/test_evaluation_results.py` | да |
 | Frontend unit | cards, statuses, filters, compare, empty states | `frontend/tests/unit/evaluation/*` | да |
 | Frontend contract | типы ответов, `null`/`—`, not_comparable | `frontend/tests/unit/evaluation/contracts.test.ts` | да |
 | E2E | запуск smoke → прогресс → summary → тест → trace → сравнение | `frontend/tests/e2e/evaluation.spec.ts` | да |
@@ -1305,11 +1502,13 @@ progress и summary, artifacts импортируются.
 | Риск | Проявление | Мера |
 |---|---|---|
 | Full-прогон долгий | UI висит, пользователь думает, что сломалось | background worker, progress, polling, timeout |
-| Benchmark конкурирует с чатом | ответы чата замедляются | `ExecutionGate`, приоритет chat, один turn |
+| Benchmark конкурирует с чатом | ответы чата замедляются | `ExecutionGate`, `LLMExecutionLock`, приоритет chat, один turn |
+| CLI и API одновременно | два процесса вызывают LLM | общий файловый lock, `llm_busy`, stale recovery |
+| Режим `all` схлопывает результаты | потеря двух из трёх прогонов | `retrieval_mode` в ключе и имени trace |
+| Dataset/корпус дрейфует | сравнение врёт | dataset hash + content hash, `not_comparable` |
 | Очередь переполнена | новые запуски не создаются | `queue_full`, лимит, отмена |
 | Trace слишком большой | медленный API/UI | отдельный endpoint, лимит, pagination |
 | Артефакты потеряны | summary есть, traces нет | `trace_unavailable`, failed import |
-| Dataset дрейфует | сравнение врёт | dataset hash, `not_comparable` |
 | API перезапущен | run завис | `interrupted`, кнопка повтора |
 | SQLite locked | ошибки записи | WAL, один worker, короткие транзакции |
 | Чужой run | утечка данных | owner/role check, 404 |
@@ -1331,7 +1530,13 @@ progress и summary, artifacts импортируются.
   `not_comparable`.
 - [ ] График динамики строится по реальным запускам без нулей на пропусках.
 - [ ] Benchmark использует тот же `AgentService`; второй копии нет.
-- [ ] LLM-вызовы сериализованы; benchmark не конкурирует с чатом.
+- [ ] LLM-вызовы сериализованы; benchmark не конкурирует с чатом ни внутри API, ни с
+  CLI-runner'ом.
+- [ ] Результаты различаются по `retrieval_mode` и `attempt_index`; trace-файлы не
+  перезаписываются при `retrieval_mode=all`.
+- [ ] Статусы Evaluation run включают `cancel_requested`; `abstained` не выдаётся за
+  ошибку.
+- [ ] Pass rate показывается вместе с execution coverage.
 - [ ] Evaluation storage отделён от чата.
 - [ ] Версии и dataset hash видны в UI.
 - [ ] Empty/error/loading состояния работают.

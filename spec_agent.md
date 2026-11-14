@@ -173,7 +173,12 @@ run_failed(error_code, user_message)
 
 ## 6. WebUI агента
 
-WebUI — Streamlit application и основной интерфейс работы с агентом. Чат показывает:
+> **Целевая реализация.** Требования этого раздела описывают поведение интерфейса,
+> а не технологию. Целевой UI — React WebUI по `docs/specs/web-ui-modernization.md`;
+> Streamlit (`src/ui/app.py`) — legacy до этапа 5 миграции. Раздел Evaluation
+> описан в `docs/specs/evaluation-webui.md`, benchmark — в `spec_benchmark.md`.
+
+Текущий WebUI — Streamlit application; целевой интерфейс — React. Чат показывает:
 
 - сообщения пользователя и финальный ответ агента;
 - этап обработки (анализ запроса, вызов поиска/структуры/графа, сбор evidence);

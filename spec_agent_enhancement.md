@@ -1,11 +1,16 @@
 # Спецификация усиления Agent_RAG
 
-**Версия:** 1.0
+**Версия:** 1.1
 **Статус:** целевой контракт поверх реализованного Agent_RAG. Архитектура не переписывается.
 **База анализа:** `main` (`f77652a`) + незакоммиченные файлы рабочего дерева.
-**Связанные документы:** [spec_agent.md](spec_agent.md), [spec_retrieval_engine.md](spec_retrieval_engine.md), [spec_target.md](spec_target.md), [spec_graph.md](spec_graph.md), [spec_ui_eval.md](spec_ui_eval.md)
+**Связанные документы:** [spec_agent.md](spec_agent.md), [spec_retrieval_engine.md](spec_retrieval_engine.md), [spec_target.md](spec_target.md), [spec_graph.md](spec_graph.md), [spec_ui_eval.md](spec_ui_eval.md), [spec_benchmark.md](spec_benchmark.md)
 
 > Спецификация составлена по статическому анализу исходников. Тесты в ходе анализа не запускались.
+>
+> **Ревизия 1.1.** Диагностика усиления сведена в единый
+> `AgentRunResult.diagnostics` (контракт — `spec_benchmark.md` §4.4). Agent-level
+> benchmark не дублируется: P8 расширяет общий `eval/`, а не создаёт второй набор и
+> второй runner.
 
 ## 1. Назначение
 
@@ -172,7 +177,8 @@ distinct_sections: int
 distinct_years: int
 ```
 
-`RetrievalResult` не меняет форму; trace передаётся в `ToolEvent.diagnostics` и `AgentRunResult.retrieval_diagnostics`.
+`RetrievalResult` не меняет форму; trace передаётся в `ToolEvent.diagnostics` и в
+`AgentRunResult.diagnostics["retrieval_calls"]` (единый контейнер, §4.9).
 
 ### 4.5. Facts
 
@@ -282,6 +288,34 @@ class VerificationResult:
 | `max_coverage_searches` | 1 | дополнительный поиск по gaps |
 | `verification_enabled` | True | пост-проверка ответа |
 | `structural_max_docs` | 5 | максимум документов для diff |
+
+### 4.9. Контейнер диагностики
+
+Канонический контракт `AgentRunResult.diagnostics` определён в
+[spec_benchmark.md](spec_benchmark.md) §4.4. Эта спецификация не вводит параллельных
+полей результата; она заполняет следующие ключи:
+
+| Ключ | Заполняется в |
+|---|---|
+| `query_plan` | P2 |
+| `search_attempts` | P3 |
+| `retrieval_calls` | P1, P4 |
+| `evidence_manifest` / `context_chunk_ids` | P1 |
+| `coverage` | P3 |
+| `verification` | P8 |
+| `structural_changes` | P5 |
+
+Правила:
+
+- `AgentRunResult` получает одно поле `diagnostics: dict[str, Any]` с
+  `default_factory=dict`; отдельные `coverage`, `verification`, `retrieval_calls`
+  в результате не появляются;
+- `AgentRunResult.structural_changes` и `AgentRunResult.calculations` остаются
+  совместимыми зеркалами для UI и тестов; они заполняются из тех же объектов, а не
+  пересчитываются;
+- `retrieval_diagnostics` из рабочего дерева — deprecated alias на
+  `diagnostics["retrieval_calls"]`; удаляется после миграции потребителей;
+- если компонент ещё не реализован, ключ равен `null`, а не выдуманному значению.
 
 ## 5. Работы по приоритетам
 
@@ -397,7 +431,7 @@ cet1         → cet1, достаточность капитала
 | `src/agent/coverage.py` (новый) | `build_coverage(...)`, `CoverageReport`, `to_dict()` |
 | `src/agent/state.py` | Заполнять существующие `expected_years`, `covered_years`, `missing_years`, `search_attempts`; добавить `coverage`, `coverage_status`, `coverage_searches_used` |
 | `src/agent/agent_graph.py` | `assess_evidence` и `after_assess` используют coverage |
-| `src/agent/service.py` | Инициализация state, передача gaps в генератор, `AgentRunResult.coverage` |
+| `src/agent/service.py` | Инициализация state, передача gaps в генератор, `diagnostics["coverage"]` |
 | `src/engine/generator.py`, `src/engine/prompts.py` | `coverage` в prompt как `evidence_gaps` |
 | `src/ui/app.py` | Таблица покрытия и gaps |
 | `tests/test_coverage.py` (новый), `tests/test_temporal_agent.py` | Матрица и маршрутизация |
@@ -440,7 +474,7 @@ cet1         → cet1, достаточность капитала
 | `src/retrieval/diversity.py` (новый) | `select_diverse(hits, limit, ...)` |
 | `src/retrieval/temporal_search.py` | Проброс `queries` |
 | `src/agent/tools.py`, `src/agent/agent_graph.py` | Валидация и передача `queries` |
-| `src/agent/state.py` | `ToolEvent.diagnostics`; `AgentRunResult.retrieval_diagnostics`; использовать `search_attempts` |
+| `src/agent/state.py` | `ToolEvent.diagnostics`; `AgentRunResult.diagnostics["retrieval_calls"]`; использовать `search_attempts` |
 | `src/agent/service.py` | Заполнение diagnostics в `ToolEvent` и итоговом результате |
 | `src/ui/app.py` | Счётчики каналов, документов, разделов, лет |
 | `tests/test_diversity.py` (новый), `tests/test_hybrid_retriever.py` | Разнообразие и multi-query |
@@ -480,7 +514,7 @@ cet1         → cet1, достаточность капитала
 | `src/agent/factory.py` | Backend поверх `*_sections.json`; year из payload/doc_id |
 | `src/agent/agent_graph.py` | Схема `compare_structures`, allowlist, сбор `structural_changes` |
 | `src/agent/state.py` | Заполнять `structure_documents`, `section_matches`, `structural_changes`, `structure_comparison_complete` |
-| `src/agent/service.py` | `AgentRunResult.structural_changes` |
+| `src/agent/service.py` | `AgentRunResult.structural_changes` и `diagnostics["structural_changes"]` |
 | `src/ui/app.py` | Блок «Изменения структуры» |
 | `tests/test_structure_compare.py` (новый), `tests/test_agent_factory.py` | Diff и доступность |
 
@@ -608,13 +642,13 @@ output: documents, section_matches, structural_changes, warnings
 |---|---|
 | `src/engine/verification.py` (новый) | `verify_answer(...)`, issue codes |
 | `src/agent/service.py` | Verification → один repair → sanitize facts → calculations |
-| `src/agent/state.py` | `verification` в `AgentRunResult` |
+| `src/agent/state.py` | `diagnostics["verification"]` в `AgentRunResult` |
 | `src/agent/agent_graph.py` | `validate_answer` остаётся schema/citation-валидатором; verification в графе не дублируется |
 | `src/ui/app.py` | Блок «Проверка ответа» |
 | `scripts/eval_retrieval.py` | nDCG@K |
-| `scripts/eval_agent.py` (новый) | Agent-level eval |
-| `data/eval/agent_questions.json` (новый) | 8 типов задач |
-| `tests/test_verification.py`, `tests/test_eval_agent.py` | Проверки и метрики |
+| `eval/runner.py` | использовать общий benchmark; второй agent-level eval не создаётся |
+| `eval/datasets/*.json` | добавить типы задач P8 в общий набор |
+| `tests/test_verification.py` | Проверки verification |
 
 **Проверки `verify_answer`:**
 
@@ -632,25 +666,12 @@ output: documents, section_matches, structural_changes, warnings
 - Warnings → ответ сохраняется, warnings показываются в UI.
 - Отдельный Critic Agent не вводится.
 
-**Eval-набор `agent_questions.json`:**
+**Eval-набор:**
 
-```json
-{
-  "id": "temporal_profit_2020_2024",
-  "task_type": "temporal_comparison",
-  "question": "Сравни чистую прибыль за 2020–2024 годы.",
-  "expected_status": "answer",
-  "required_chunk_ids": ["..."],
-  "expected_facts": [
-    {"metric": "net_profit", "year": 2020, "value": 442.9, "unit": "млрд руб.", "tolerance": 0.01}
-  ],
-  "must_mention": ["2020", "2024"],
-  "missing_years": [2021],
-  "expected_calculations": [
-    {"metric": "net_profit", "from_year": 2020, "to_year": 2024, "percent_change": 0.0, "tolerance": 0.02}
-  ]
-}
-```
+Второй agent-level eval не создаётся. Набор, схема, runner и отчёт определены в
+`spec_benchmark.md`; P8 добавляет в `eval/datasets/*.json` типы задач ниже и использует
+общий `eval.runner`. Отдельный `agent_questions.json` или `scripts/eval_agent.py` не
+вводится.
 
 Типы задач (минимум 2 вопроса на тип):
 
@@ -665,7 +686,7 @@ output: documents, section_matches, structural_changes, warnings
 | `citation` | цитаты подтверждают утверждения |
 | `abstention` | корректный отказ при отсутствии данных |
 
-**Метрики `eval_agent.py`:**
+**Метрики benchmark:**
 
 | Уровень | Метрика |
 |---|---|
@@ -673,7 +694,10 @@ output: documents, section_matches, structural_changes, warnings
 | Agent answer | fact_accuracy, answer_completeness, citation_precision, citation_recall, calculation_accuracy, abstention_accuracy, status_accuracy |
 | Operations | tool_calls, latency, warnings, coverage_status |
 
-`citation_precision` считается детерминированным верификатором, а не LLM-судьёй. Трасса сохраняется в `agent_results.json`: запросы, режимы, filters, tool events, coverage, verification, calculations, warnings. Секреты и полный prompt не сохраняются.
+`citation_precision` считается детерминированным верификатором, а не LLM-судьёй.
+Трасса сохраняется в `eval/results/{run_id}/traces/` по контракту
+`spec_benchmark.md` §4: запросы, режимы, filters, tool events, coverage, verification,
+calculations, warnings. Секреты и полный prompt не сохраняются.
 
 **Приёмка:**
 
@@ -682,7 +706,7 @@ output: documents, section_matches, structural_changes, warnings
 - AC-P8-3: причинный вывод при совместном упоминании даёт warning.
 - AC-P8-4: пропущенный обязательный показатель даёт `gap_not_disclosed` или `incomplete_period`.
 - AC-P8-5: repair вызывается не более одного раза.
-- AC-P8-6: `eval_agent.py --limit 3` пишет JSON и печатает таблицу.
+- AC-P8-6: `eval.runner --suite smoke` использует общий набор и не требует второго eval-скрипта.
 - AC-P8-7: nDCG@K покрыт unit-тестом.
 - AC-P8-8: отсутствие ключа API не ломает offline unit-тесты; live eval запускается только с env.
 
@@ -714,8 +738,8 @@ Eval-набор начинать на P3: coverage-тесты сразу даю�
 | Factory | сборка backend’ов, каталог документов, отсутствие graph | `tests/test_agent_factory.py` | да |
 | Generator | facts-схема, таблицы, legacy-поля, drop факта | `tests/test_answer_generator.py` | да |
 | UI helpers | безопасные warnings, trace, coverage-рендер | `tests/test_ui_helpers.py` | да |
-| Eval schema | все gold `chunk_id` существуют в корпусе | `tests/test_eval_agent.py` | да |
-| Live eval | факты, цитаты, полнота, abstention | `scripts/eval_agent.py` | нет (nightly/manual) |
+| Eval schema | все gold `chunk_id` существуют в корпусе | `tests/test_eval_dataset.py` | да |
+| Live eval | факты, цитаты, полнота, abstention | `eval.runner --suite smoke` | нет (nightly/manual) |
 
 Все unit/integration-тесты офлайновые: fake client, fake embedder, без сети и ключей.
 
@@ -770,8 +794,8 @@ Eval-набор начинать на P3: coverage-тесты сразу даю�
 | `src/engine/verification.py` | новый | проверка утверждений и чисел |
 | `src/ui/app.py` | изменение | coverage, calculations, verification, trace |
 | `scripts/eval_retrieval.py` | изменение | nDCG@K |
-| `scripts/eval_agent.py` | новый | agent-level eval |
-| `data/eval/agent_questions.json` | новый | 8 типов задач |
+| `eval/runner.py`, `eval/evaluators/answer.py` | использование | общий benchmark; второй agent-level eval не создаётся |
+| `eval/datasets/*.json` | изменение | типы задач P8 в общем наборе |
 | `tests/*` | новые/расширение | см. §7 |
 | `README.md` | изменение | новые возможности и запуск eval |
 

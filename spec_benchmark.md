@@ -1,7 +1,10 @@
 # Спецификация Benchmark / Evaluation Framework Agent_RAG
 
-**Версия:** 1.0
+**Версия:** 1.1
 **Статус:** целевой контракт; benchmark-контур ещё не реализован.
+**Ревизия 1.1:** устранён конфликт Streamlit/React, добавлена идентичность
+`test_id + retrieval_mode + attempt_index`, разделены статусы, закреплена версия
+корпуса, уточнены сопоставимость, denominator и контракт `diagnostics`.
 **База анализа:** `main` (`f77652a`) + рабочее дерево: `AgentService`, `AgentTools`,
 `HybridRetriever`, `RetrievalTrace`, `scripts/eval_retrieval.py`.
 **Связанные документы:** [spec_target.md](spec_target.md), [spec_agent.md](spec_agent.md),
@@ -200,7 +203,7 @@ agent-level тест провален, и для проверки режимов
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "suite": "easy",
   "expected_corpus_sha256": "<sha256-hex>",
   "tests": []
@@ -209,6 +212,10 @@ agent-level тест провален, и для проверки режимов
 
 `suite` обязан совпадать с именем файла: `easy`, `medium`, `hard`, `multi_turn`.
 Допускается один файл на suite; дробить на десятки файлов не нужно.
+
+`schema_version=1.1` добавляет обязательный `expected_corpus_sha256`. Файлы 1.0 без
+этого поля не принимаются: иначе нельзя доказать, что эталон размечен по текущему
+корпусу.
 
 `expected_corpus_sha256` фиксирует версию корпуса, по которой размечены
 `gold_evidence` и `chunk_id`. Без этого hash можно незаметно пересобрать корпус:
@@ -233,7 +240,7 @@ agent-level тест провален, и для проверки режимов
 
 ```json
 {
-  "dataset_version": "1.0",
+  "dataset_version": "1.1",
   "created_at": "2026-11-14T00:00:00Z",
   "expected_corpus_sha256": "<sha256-hex>",
   "chunk_count": 0,
@@ -731,7 +738,7 @@ Defaults не могут превышать системные лимиты (`MA
 
 ```json
 {
-  "trace_schema_version": "1.0",
+  "trace_schema_version": "1.1",
   "run_id": "20261114_120000_f77652a",
   "test_id": "easy_001",
   "retrieval_mode": "hybrid",
@@ -863,6 +870,10 @@ Defaults не могут превышать системные лимиты (`MA
 ```
 
 ### 4.2. Обязательные поля
+
+`status` в trace — это `AgentRunResult.status` (`completed`/`abstained`/`failed`).
+Статус теста (`completed`/`failed`/`timeout`/`error`/`skipped`) хранится отдельно в
+`cases.jsonl` и в API-результате; эти значения не взаимозаменяемы (§5.9).
 
 Поля `query_plan`, `effective_filters`, `search_attempts`, `retrieval_calls`,
 `evidence_manifest`, `context_chunk_ids`, `covered_years`/`missing_years` читаются из
@@ -1286,7 +1297,7 @@ scenario_success =
 | `judge_error` | `completed` | `judge_errors=+1`, judge-поля `null` |
 | timeout turn'а | `timeout` | `timeouts=+1`, тест не проходит |
 | ошибка runner/evaluator | `error` | `errors=+1`, текст ошибки |
-| отмена пользователем | `skipped` (частично) | run `cancelled`, тесты без результата не считаются выполненными |
+| отмена пользователем | нет строки или уже записанный статус | run `cancelled`, незавершённые тесты не считаются выполненными |
 
 #### Coverage и denominator
 
@@ -1294,8 +1305,8 @@ scenario_success =
 
 ```text
 tests_selected      # после suite/split/tag/ids/limit
-tests_eligible      # selected - unsupported - invalid; участвуют в pass rate
-executed            # turn'ы реально выполнены: completed/failed/timeout/error
+tests_eligible      # selected - skipped/unsupported - errors - invalid; участвуют в pass rate
+executed            # тесты с валидным результатом выполнения: completed/failed/timeout
 passed
 failed
 skipped             # unsupported_mode или явный пропуск
@@ -1320,6 +1331,11 @@ execution_coverage = executed / tests_selected
 - нельзя показывать высокий pass rate без execution coverage: 18/20 и 18/30 — разные
   результаты, и оба числа обязаны быть видны;
 - ошибка отдельного теста не превращается в `0.0`.
+
+При `--retrieval-mode all` единица учёта — пара `(test_id, retrieval_mode)`: каждая
+пара входит в `tests_selected`/`tests_eligible` отдельно, а `by_mode` показывает
+разрез. Top-level `pass_rate` в этом режиме — aggregate по всем парам; подписывать его
+как «качество hybrid» запрещено.
 
 Автоматических retry нет: повтор — только явный `--repeat`, и все попытки сохраняются
 в результатах.
@@ -1398,7 +1414,7 @@ test_id, retrieval_mode, attempt_index, call_index, stage, rank, chunk_id, score
   "command": "...",
   "git": {"sha": "...", "dirty": false},
   "dataset": {
-    "version": "1.0",
+    "version": "1.1",
     "sha256": "...",
     "tests": 30,
     "expected_corpus_sha256": "...",
@@ -1460,9 +1476,9 @@ test_id, retrieval_mode, attempt_index, call_index, stage, rank, chunk_id, score
     "errors": 0,
     "judge_errors": 0
   },
-  "pass_rate": null,
-  "execution_coverage": 0.0,
-  "pass_at_1": null,
+  "pass_rate": 0.0,
+  "execution_coverage": 1.0,
+  "pass_at_1": 0.0,
   "stability": null,
   "groups": {
     "retrieval": {
@@ -1542,6 +1558,8 @@ test_id, retrieval_mode, attempt_index, call_index, stage, rank, chunk_id, score
 
 `by_difficulty.multi_turn` — это bucket по suite `multi_turn`, а не значение поля
 `difficulty`; так отчёт не смешивает многошаговые сценарии с medium-вопросами.
+Каждый breakdown (`by_difficulty`, `by_category`, `by_split`, `by_mode`) содержит не
+только `pass_rate`, но и `eligible`/`executed`, чтобы малый знаменатель был виден.
 
 ### 6.3. `cases.jsonl`
 
@@ -1590,13 +1608,17 @@ N строк на каждую пару. Итоговый `pass` теста сч
 }
 ```
 
+Метрика, которая не измерялась, равна `null`, а не `0.0`; для retrieval-метрик
+дополнительно перечисляется `not_measured`. `status` описывает выполнение, а не
+качество: `completed` с `pass=false` — нормальная запись.
+
 ### 6.4. Главная страница отчёта
 
 Отчёт — самодостаточный HTML без внешних запросов и без сети. Содержит:
 
 - run id, дату, git SHA, модель, датасет, корпус, конфиг;
 - четыре карточки:
-  - Pass rate;
+  - Pass rate (всегда с execution coverage);
   - Retrieval Recall@10;
   - Answer quality (automatic pass rate);
   - Multi-turn success;
@@ -1907,9 +1929,9 @@ SHA и конфиг агента сравнение не блокируют.
 | `src/retrieval/hybrid_retriever.py` | изменение | опциональные stage lists в trace |
 | `src/retrieval/temporal_search.py` | изменение | проброс stage lists |
 | `src/retrieval/graph_hybrid.py` | изменение | проброс/добавление graph stage |
-| `src/agent/state.py` | изменение | `AgentRunResult.diagnostics` |
+| `src/agent/state.py` | изменение | `AgentRunResult.diagnostics`; deprecated alias `retrieval_diagnostics` |
 | `src/agent/service.py` | изменение | заполнение diagnostics из state |
-| `tests/test_eval_*.py` | новый | схема, метрики, trace, evaluators, runner, report |
+| `tests/test_eval_*.py` | новый | схема, метрики, trace, evaluators, runner, report, lock |
 | `README.md` | изменение | команды benchmark |
 | `.gitignore` | изменение | `eval/results/*`, кроме `.gitkeep` |
 
@@ -1922,6 +1944,28 @@ SHA и конфиг агента сравнение не блокируют.
 4. Report зависит от `summary.json` и `cases.jsonl`; его можно разрабатывать на
    фикстурах.
 5. Judge подключается последним и не блокирует первые три этапа.
+
+#### Зависимости benchmark от Agent Enhancement
+
+| Возможность benchmark | Зависит от | Без неё |
+|---|---|---|
+| Раздельный запуск `hybrid`/`dense`/`keyword` | P1 | `unsupported_mode` → `skipped` |
+| Оценка query planning (`query_plan`) | P2 | `not_measured` |
+| Оценка полноты периода (`covered_years`, `missing_years`, coverage) | P3 | `not_measured` |
+| Диагностика rewriting/diversity | P4 | `not_measured` |
+| Оценка структурных изменений | P5 | `not_measured` |
+| Проверка расчётов | P6 | `not_measured` |
+| Проверка graph retrieval | P7 | `not_measured` |
+| `verification` и agent-level quality | P8 | `not_measured` |
+
+Правила:
+
+- runner выполняет preflight и записывает фактически доступные возможности в
+  `summary.capabilities`;
+- пока возможность не реализована, тест не проходит за счёт заглушки: статус
+  `skipped` (`unsupported_mode`) или метрика `null`/`not_measured`;
+- capability нельзя «включить» конфигом, если backend её не поддерживает;
+- тест, требующий недоступную возможность, не попадает в `tests_eligible`.
 
 ## 10. Acceptance criteria
 
@@ -1984,12 +2028,34 @@ SHA и конфиг агента сравнение не блокируют.
   difficulty/category/split, coverage, critical errors и problem tests.
 - **AC-B21.** HTML-отчёт самодостаточен, открывается локально без сети и показывает
   цепочку `Question → Query Plan → Search Queries → Retrieved Chunks → Evidence → Answer`.
-- **AC-B22.** `--compare` показывает дельты и изменения статусов; разные dataset hash
-  дают `not_comparable`, а не ложную регрессию.
+- **AC-B22.** `--compare` показывает дельты и изменения статусов; разный
+  `dataset.sha256` или `corpus.content_sha256` даёт `not_comparable` и side-by-side, а
+  не ложную регрессию.
 - **AC-B23.** Ошибка/таймаут/неподдержанный режим видны в coverage и не превращаются
-  в нулевую оценку.
+  в нулевую оценку; `pass_rate` не показывается без `execution_coverage`.
 - **AC-B24.** Повторный прогон с тем же датасетом/конфигом создаёт сопоставимые
   артефакты; нестабильность отражается через `--repeat`, а не скрывается.
+
+### Контракты и совместимость
+
+- **AC-B29.** Датасет фиксирует `expected_corpus_sha256`; несовпадение с текущим
+  корпусом даёт `dataset_corpus_mismatch` и не запускает прогон.
+- **AC-B30.** Идентичность результата — `(run_id, test_id, retrieval_mode,
+  attempt_index)`; при `--retrieval-mode all` три режима дают три отдельные записи и
+  три trace-файла без перезаписи.
+- **AC-B31.** Статусы Agent execution, Answer, Test result и Evaluation run не
+  смешиваются; `abstained` проходит abstain-тест; `pass_rate` и
+  `execution_coverage` считаются по §5.9.
+- **AC-B32.** CLI и API используют общий межпроцессный `LLMExecutionLock`; при занятом
+  lock'е второй процесс не вызывает LLM параллельно, а ждёт или завершается кодом 5.
+- **AC-B33.** `AgentRunResult.diagnostics` — единственный контейнер диагностики;
+  `retrieval_diagnostics` работает только как deprecated alias, а недоступные данные
+  дают `null`/`not_measured`.
+- **AC-B34.** `summary.capabilities` отражает реально доступные P1–P8; отсутствующая
+  возможность не маскируется заглушкой и не попадает в `tests_eligible`.
+- **AC-B35.** `must_not_use_tools` проверяется строго; `must_use_tools` проваливает
+  тест только при `must_use_tools_strict=true`, иначе даёт warning
+  `alternative_tool_path`.
 
 ### Safety and scope
 
@@ -2010,6 +2076,8 @@ SHA и конфиг агента сравнение не блокируют.
 | Answer | факты, годы, citations, расчёты, critical errors | `tests/test_eval_answer.py` | да |
 | Dialogue | контекст, correction, contradiction, cascade | `tests/test_eval_dialogue.py` | да |
 | Runner | smoke на fake AgentService, артефакты, coverage | `tests/test_eval_runner.py` | да |
+| Result identity | режимы, attempts, имена trace, `cases.jsonl` | `tests/test_eval_results.py` | да |
+| Cross-process lock | CLI + API не вызывают LLM одновременно | `tests/eval/test_llm_lock.py` | да |
 | Report | HTML/MD, summary, compare, пустые значения | `tests/test_eval_report.py` | да |
 | Agent diagnostics | `AgentRunResult.diagnostics` не ломает старые тесты | `tests/test_agent_service.py` | да |
 | Live smoke | реальный `AgentService`, 12 тестов | `eval.runner --suite smoke` | нет (manual/nightly) |
@@ -2028,7 +2096,9 @@ Live-прогоны не входят в обычный `pytest`.
 | LLM-судья смещён | Красивый ответ получает высокий балл | Судья вторичен, deterministic checks, калибровка, ручная выборка |
 | Недетерминированный reranker | Разные результаты повторов | `--repeat`, stability, фиксация модели и параметров |
 | Trace слишком большой | Медленный отчёт | Только ID/ранги/scores, лимит 5 МБ, `truncated` |
-| Режим не поддержан | Метрики режима фиктивны | `unsupported_mode`, не подменять hybrid |
+| Режим не поддержан | Метрики режима фиктивны | `unsupported_mode`, capability preflight, не подменять hybrid |
+| Корпус пересобран | Эталон устарел, chunk ID совпали | `expected_corpus_sha256`, `dataset_corpus_mismatch` |
+| CLI и API одновременно | Два процесса конкурируют за LLM | межпроцессный `LLMExecutionLock`, `llm_busy` |
 | Стоимость/latency | Долгий full-прогон | smoke 12, full 30, judge опционален |
 | Секреты в артефактах | Утечка ключей/prompt | Redaction, offline contract-тесты, `.gitignore` |
 | Benchmark меняет поведение | Агент оптимизируется под тест | Наблюдаемость вместо управления, эталон не передаётся агенту |
@@ -2036,17 +2106,31 @@ Live-прогоны не входят в обычный `pytest`.
 ## 13. Definition of Done
 
 - [ ] 30 эталонных тестов с проверенными facts/gold evidence; 6 holdout, 12 smoke.
-- [ ] Валидатор датасета проходит; `null`/фантазийные chunk_id запрещены.
+- [ ] Валидатор датасета проходит; `null`/фантазийные chunk_id запрещены;
+  `expected_corpus_sha256` закреплён и проверяется.
 - [ ] Runner запускает реальный `AgentService` и сохраняет trace.
 - [ ] Trace содержит query plan, search calls, этапы dense/BM25/RRF/rerank/context,
   evidence и ответ без секретов и chain-of-thought.
+- [ ] `AgentRunResult.diagnostics` — единый контейнер; недоступные данные дают
+  `null`/`not_measured`, а не синтетические значения.
+- [ ] Результаты различаются по `(test_id, retrieval_mode, attempt_index)`; trace-файлы
+  не перезаписывают друг друга при `--retrieval-mode all`.
+- [ ] Статусы Agent execution, Answer, Test result и Evaluation run разделены;
+  `abstained` не считается ошибкой выполнения.
+- [ ] `pass_rate` считается по eligible-тестам, `execution_coverage` показывается
+  рядом; пропуски и ошибки не маскируются.
 - [ ] Retrieval/Answer/Dialogue evaluators работают и покрыты offline-тестами.
 - [ ] Critical errors отделены от rubric score.
 - [ ] Multi-turn сценарии сохраняют контекст, correction и contradiction проверяются.
 - [ ] `summary.json`, `cases.jsonl`, `traces/`, `report.html`, `report.md` создаются
   одним прогоном.
-- [ ] `--compare` показывает дельты и не сравнивает разные датасеты как регрессию.
+- [ ] `--compare` показывает дельты и не сравнивает разные датасеты/корпуса как
+  регрессию.
 - [ ] Ошибки, таймауты и `unsupported_mode` видны в coverage, не равны нулю.
+- [ ] CLI и API сериализуют LLM через общий межпроцессный lock; параллельный вызов
+  невозможен.
+- [ ] `must_use_tools` не подменяет оценку evidence: strict только там, где это смысл
+  сценария.
 - [ ] Benchmark не меняет рабочую логику Agent_RAG; старые тесты проходят.
 - [ ] README содержит команды validate/smoke/full/report/compare.
 - [ ] В артефактах нет ключей, полного prompt и полного текста корпуса.
