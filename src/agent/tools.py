@@ -1,4 +1,4 @@
-"""Allowlisted adapters around injected retrieval and local artifact tools."""
+"""Адаптеры из белого списка вокруг переданного поиска и локальных артефактов."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from src.retrieval.hybrid_retriever import SearchFilters
 
 
 class ToolUnavailable(RuntimeError):
-    """A supported optional tool is not configured or its index is unavailable."""
+    """Поддерживаемый необязательный инструмент не настроен или его индекс недоступен."""
 
 
 class SearchBackend(Protocol):
@@ -47,7 +47,7 @@ def _valid_filters(value: Any) -> SearchFilters:
 
 @dataclass
 class AgentTools:
-    """Server-configured tool facade. Missing optional backends fail safely."""
+    """Фасад настроенных на сервере инструментов. Отсутствующие опциональные backend'ы безопасно недоступны."""
 
     search_backend: SearchBackend | Callable[..., Any] | None = None
     structure_backend: StructureBackend | Callable[..., Any] | None = None
@@ -140,7 +140,7 @@ class AgentTools:
 
 
 def result_hits(result: Any) -> list[Any]:
-    """Normalize RetrievalResult/list/mapping search outputs."""
+    """Приводит результат поиска (RetrievalResult/список/словарь) к списку хитов."""
     hits = _field(result, "hits", None)
     if hits is None:
         hits = result if isinstance(result, (list, tuple)) else []

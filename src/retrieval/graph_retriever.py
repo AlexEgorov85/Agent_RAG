@@ -1,4 +1,4 @@
-"""Bounded graph retrieval returning source chunk IDs and evidence paths."""
+"""Ограниченный графовый поиск, возвращающий ``chunk_id`` источников и пути свидетельств."""
 
 from __future__ import annotations
 
@@ -16,11 +16,11 @@ def resolve_entity_ids(
     entity_names: Iterable[str],
     entity_types: Iterable[str] | None = None,
 ) -> list[str]:
-    """Resolve names and aliases to sorted, deduplicated entity node IDs.
+    """Разрешает имена и псевдонимы в отсортированные уникальные ID узлов-сущностей.
 
-    Matching collapses whitespace and ignores case. If ``entity_types`` is
-    supplied, only entities with one of those exact canonical types match.
-    Ambiguous aliases intentionally return every matching ID in stable order.
+    Пробелы схлопываются, регистр игнорируется. Если задан ``entity_types``,
+    совпадают только сущности с одним из этих точных канонических типов.
+    Неоднозначные псевдонимы намеренно возвращают все совпавшие ID стабильно.
     """
     names = [entity_names] if isinstance(entity_names, str) else entity_names
     if isinstance(entity_types, str):
@@ -59,13 +59,22 @@ def retrieve_graph(
     section_path: str | None = None,
     max_depth: int = 2,
     max_results: int = 10,
+    include_relation_evidence: bool = True,
 ) -> list[GraphRetrievalResult]:
-    """Retrieve eligible chunks reachable from supplied entity node IDs.
+    """Возвращает подходящие чанки, достижимые от переданных ID сущностей.
 
-    Relation edges are traversed only when they carry existing evidence chunk
-    IDs. Traversal is bounded by ``max_depth``; metadata and section filters
-    apply to chunks before results are ranked. Scores are deterministic,
-    depth-based candidate scores intended for later fusion/reranking.
+    Рёбра связей обходятся только при наличии существующих ID чанков-доказательств.
+    Глубина ограничена ``max_depth``; фильтры метаданных и разделов применяются
+    до ранжирования. Оценки детерминированы и зависят от глубины; они
+    предназначены для последующего слияния/реранжирования.
+
+    Args:
+        include_relation_evidence: При ``True`` чанки, указанные в пройденных
+            рёбрах ``RELATED_TO``, тоже возвращаются как кандидаты. При ``False``
+            возвращаются только чанки, напрямую упоминающие стартовые сущности;
+            связи по-прежнему ограничивают обход, но не могут подмешать
+            свидетельства о соседних сущностях. Вызывающим, которым важна
+            точность (graph-augmented retrieval), следует использовать ``False``.
     """
     if max_depth < 0 or max_results < 0:
         raise ValueError("max_depth and max_results must be non-negative.")
@@ -76,9 +85,9 @@ def retrieve_graph(
 
     candidates: dict[str, dict[str, Any]] = {}
 
-    # Keep the best deterministic path to each entity. RELATED_TO is treated as
-    # traversable in either direction, while path output preserves actual edge
-    # direction for explanation.
+    # Храним лучший детерминированный путь к каждой сущности. RELATED_TO
+    # проходим в обе стороны, но путь сохраняет реальное направление рёбер
+    # для объяснения.
     reached: dict[str, tuple[int, tuple[str, ...], tuple[str, ...], str]] = {}
     queue = deque((node_id, 0, (node_id,), ()) for node_id in starts)
     while queue:
@@ -98,10 +107,11 @@ def retrieve_graph(
                 doc_ids, years, issuers, section_path,
             )
             if proof:
-                _add_relation_candidates(
-                    candidates, graph, node_id, source, proof, evidence, path,
-                    depth + 1,
-                )
+                if include_relation_evidence:
+                    _add_relation_candidates(
+                        candidates, graph, node_id, source, proof, evidence, path,
+                        depth + 1,
+                    )
                 neighbors.append((source, proof))
         for source, target, attrs in graph.out_edges(node_id, data=True):
             if attrs.get("type") != "RELATED_TO":
@@ -111,10 +121,11 @@ def retrieve_graph(
                 doc_ids, years, issuers, section_path,
             )
             if proof:
-                _add_relation_candidates(
-                    candidates, graph, node_id, target, proof, evidence, path,
-                    depth + 1,
-                )
+                if include_relation_evidence:
+                    _add_relation_candidates(
+                        candidates, graph, node_id, target, proof, evidence, path,
+                        depth + 1,
+                    )
                 neighbors.append((target, proof))
         for neighbor, proof in sorted(neighbors, key=lambda item: (item[0], item[1])):
             if neighbor not in path:
@@ -122,6 +133,9 @@ def retrieve_graph(
                               tuple(sorted(set(evidence).union(proof)))))
 
     for entity_id, (depth, entity_path, relation_evidence, start_id) in reached.items():
+        if not include_relation_evidence and entity_id not in starts:
+            # Режим точности: не цитируем чанки соседних сущностей.
+            continue
         for chunk_node, _, attrs in graph.in_edges(entity_id, data=True):
             edge_attrs = attrs
             if edge_attrs.get("type") != "MENTIONS":
@@ -136,8 +150,8 @@ def retrieve_graph(
                 continue
             direct_proof = _valid_evidence(graph, edge_attrs.get("evidence_chunk_ids", ()))
             all_evidence = tuple(sorted(set(relation_evidence).union(direct_proof)))
-            # Evidence includes the returned chunk itself, which guarantees the
-            # candidate always has a citation-ready source witness.
+            # Свидетельства включают сам возвращаемый чанк — так у кандидата
+            # всегда есть источник, готовый для цитаты.
             all_evidence = tuple(sorted(set(all_evidence).union({chunk_id})))
             candidate_path = entity_path + (chunk_node,)
             candidate = candidates.setdefault(chunk_id, {
@@ -178,7 +192,7 @@ def _eligible_evidence(
     issuers: set[str] | None,
     section_path: str | None,
 ) -> tuple[str, ...]:
-    """Keep only provenance chunks that exist and satisfy retrieval filters."""
+    """Оставляет только чанки-доказательства, которые существуют и проходят фильтры поиска."""
     valid = []
     for chunk_id in _valid_evidence(graph, evidence):
         node_id = f"chunk:{chunk_id}"
@@ -200,7 +214,7 @@ def _add_relation_candidates(
     entity_path: tuple[str, ...],
     relation_depth: int,
 ) -> None:
-    """Add cited chunks from a traversed relation, even absent MENTIONS edges."""
+    """Добавляет чанки, указанные в пройденной связи, даже без рёбер MENTIONS."""
     for chunk_id in evidence_ids:
         chunk_node = f"chunk:{chunk_id}"
         if graph.nodes[chunk_node].get("type") != "Chunk":
@@ -270,7 +284,7 @@ def get_graph_subgraph(
     entity_ids: set[str] | None = None,
     max_nodes: int = 200,
 ) -> GraphView:
-    """Return a bounded graph view filtered by document, section, and entity."""
+    """Возвращает ограниченный вид графа с фильтрами по документу, разделу и сущности."""
     if max_nodes < 0:
         raise ValueError("max_nodes must be non-negative.")
     eligible: set[str] = set()
@@ -295,8 +309,8 @@ def get_graph_subgraph(
         elif node_type == "Entity" and entity_ids is not None and node_id in entity_ids:
             eligible.add(node_id)
 
-    # Entity-focused views include directly connected evidence and structural
-    # ancestors; sort before applying the strict node bound.
+    # Виды вокруг сущности включают напрямую связанные свидетельства и
+    # структурных предков; сортируем перед жёстким ограничением числа узлов.
     selected = set(eligible)
     for node_id in sorted(eligible):
         for neighbor in graph.predecessors(node_id):
@@ -325,7 +339,7 @@ def get_graph_subgraph(
 
 
 def _stable_attrs(attrs: dict[str, Any]) -> dict[str, Any]:
-    """Copy graph attrs into JSON-safe deterministic values."""
+    """Копирует атрибуты графа в JSON-безопасные детерминированные значения."""
     result = {}
     for key, value in sorted(attrs.items()):
         if isinstance(value, (set, frozenset, tuple)):

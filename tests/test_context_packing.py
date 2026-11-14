@@ -1,4 +1,4 @@
-"""Offline tests for whole-chunk context packing."""
+"""Офлайн-тесты упаковки контекста целыми чанками."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ def test_packed_chunk_exposes_all_contract_fields_and_manifest():
     assert record["text"] == "Table: profit 100"
     for name in CONTEXT_FIELDS:
         assert f'"{name}"' in packed.text
-    # A table's HTML remains in the same rendered record as its text.
+    # HTML таблицы остаётся в той же отрисованной записи, что и её текст.
     assert json.loads(packed.text)["html"] == html
     assert json.loads(packed.text)["text"] in packed.text
 
@@ -68,7 +68,7 @@ def test_budget_skips_oversized_chunk_whole_and_keeps_later_small_chunks():
     assert packed.text.count('"chunk_id"') == 2
     assert ("A" * 60) in packed.text
     assert ("C" * 60) in packed.text
-    # The large chunk is absent entirely; no prefix of it was truncated in.
+    # Большой чанк отсутствует целиком; его префикс не был обрезан и вставлен.
     assert ("B" * 2_000) not in packed.text
     assert '"chunk_id": "b"' not in packed.text
 
@@ -150,3 +150,52 @@ def test_zero_budget_includes_nothing_and_invalid_budget_is_rejected():
         pack_context([], max_chars=-1)
     with pytest.raises(ValueError):
         pack_context([], max_chars=True)
+
+def test_token_budget_includes_only_chunks_that_fit_exactly():
+    first = make_chunk("a", text="A" * 40)
+    second = make_chunk("b", text="B" * 40)
+    first_only = pack_context(
+        [first],
+        max_chars=10_000,
+        max_tokens=10_000,
+        token_counter=len,
+    )
+    budget = first_only.manifest.used_tokens
+
+    packed = pack_context(
+        [first, second],
+        max_chars=10_000,
+        max_tokens=budget,
+        token_counter=len,
+    )
+
+    assert packed.manifest.included == ["a"]
+    assert packed.manifest.skipped == ["b"]
+    assert packed.manifest.used_tokens == budget
+    assert packed.manifest.max_tokens == budget
+
+
+def test_token_budget_counts_real_text_and_rejects_invalid_values():
+    from src.engine.context import count_tokens
+
+    assert count_tokens("") == 0
+    assert count_tokens("чистая прибыль группы за 2023 год") > 0
+    assert count_tokens("same text") == count_tokens("same text")
+
+    with pytest.raises(ValueError):
+        pack_context([], max_tokens=-1)
+    with pytest.raises(ValueError):
+        pack_context([], max_tokens=True)
+
+
+def test_character_and_token_budgets_are_both_enforced():
+    chunk = make_chunk("c1", text="C" * 1_000)
+    chars_cap = len(pack_context([chunk], max_chars=10_000).text) - 1
+
+    by_chars = pack_context(
+        [chunk], max_chars=chars_cap, max_tokens=10_000, token_counter=len)
+    by_tokens = pack_context(
+        [chunk], max_chars=10_000, max_tokens=chars_cap, token_counter=len)
+
+    assert by_chars.manifest.included == []
+    assert by_tokens.manifest.included == []

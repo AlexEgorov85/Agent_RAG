@@ -1,4 +1,4 @@
-"""Offline unit tests for the BM25 + dense hybrid retriever."""
+"""Офлайн-юнит-тесты гибридного ретривера BM25 + dense."""
 
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ class FakeIndex:
         self.calls.append((query, k, eligible))
         if self.error:
             raise self.error
-        # This mimics the production indexes: filter before truncating.
+        # Повторяет поведение продакшн-индексов: фильтрация до обрезки.
         return [dict(item) for item in self.results if eligible(item)][:k]
 
 

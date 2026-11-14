@@ -1,4 +1,4 @@
-"""Bounded, dependency-injected report-agent orchestration."""
+"""Ограниченная оркестрация агента отчётов с внедрением зависимостей."""
 
 from src.agent.service import AgentService
 from src.agent.state import (

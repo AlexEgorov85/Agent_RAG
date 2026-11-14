@@ -1,4 +1,4 @@
-"""RAG answering layer: whole-chunk context, prompts, generation, and engine."""
+"""Слой ответов RAG: контекст целыми чанками, промпты, генерация и движок."""
 
 from src.engine.context import (
     CONTEXT_FIELDS,

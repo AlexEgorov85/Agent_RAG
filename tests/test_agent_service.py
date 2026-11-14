@@ -1,4 +1,4 @@
-"""Offline orchestration tests with fake backends and answer generators."""
+"""Офлайн-тесты оркестрации с заглушками backend'ов и генераторов ответа."""
 
 from __future__ import annotations
 
@@ -404,7 +404,7 @@ def test_history_is_passed_to_router_selector_and_answerer_per_conversation():
     assert router_histories[2] == ("other conversation", [])
     assert selector_histories[2] == ("other conversation", [])
     assert answer_histories[2] == ("other conversation", [])
-    # Prior turns are context only: the second answer sees only its fresh hit.
+    # Прошлые ходы — только контекст: второй ответ видит лишь свой свежий хит.
     assert evidence_seen[1] == ("second question", {"second question-id"})
     assert second.answer.citations[0].chunk_id == "second question-id"
     assert isolated.answer.citations[0].chunk_id == "other conversation-id"

@@ -1,4 +1,4 @@
-"""In-memory cosine index over mapping-style chunks (offline, deterministic)."""
+"""Косинусный индекс в памяти по чанкам-словарям (офлайн, детерминированно)."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ def _chunk_id(chunk: Chunk) -> str:
 
 
 class DenseIndex:
-    """Cosine index; eligibility is applied before top-k truncation."""
+    """Косинусный индекс; фильтр применимости применяется до обрезки до top-k."""
 
     def __init__(self, chunks: Sequence[Chunk],
                  vectors: Sequence[Sequence[float]] | Mapping[str, Sequence[float]]):
@@ -74,7 +74,7 @@ class DenseIndex:
 
     def search(self, query_vector: Sequence[float], k: int = 5,
                eligible: Eligibility = None) -> list[dict[str, Any]]:
-        """Return up to ``k`` chunks ordered by cosine similarity."""
+        """Возвращает до ``k`` чанков, упорядоченных по косинусному сходству."""
         if k < 1:
             raise ValueError("k must be positive")
         if not self.chunks:

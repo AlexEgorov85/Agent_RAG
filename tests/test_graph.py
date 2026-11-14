@@ -1,4 +1,4 @@
-"""Fixture-only tests for graph building, serialization, and retrieval."""
+"""Тесты на фикстурах для сборки, сериализации и поиска по графу."""
 
 from __future__ import annotations
 
@@ -125,7 +125,7 @@ def test_related_to_evidence_is_retrievable_without_mentions_edge():
     )
     seed = resolve_entity_ids(result.graph, ["seed entity"])
 
-    # c-risk is supported by the relation edge but has no MENTIONS edge.
+    # c-risk подтверждается ребром связи, но не имеет ребра MENTIONS.
     assert not any(
         data.get("type") == "MENTIONS"
         and source == "chunk:c-risk"

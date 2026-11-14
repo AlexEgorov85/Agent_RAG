@@ -1,4 +1,4 @@
-"""Offline tests for the JSON answer generator and its safety fallbacks."""
+"""Офлайн-тесты JSON-генератора ответов и его безопасных fallback-ов."""
 
 from __future__ import annotations
 
@@ -92,7 +92,7 @@ def test_valid_json_is_parsed_and_citation_metadata_comes_from_evidence():
     citation = answer.citations[0]
     assert citation.chunk_id == "c1"
     assert citation.quote == "Чистая прибыль составила"
-    # Metadata is taken from the packed source, not trusted from the model.
+    # Метаданные берутся из упакованного источника, а не из ответа модели.
     assert citation.doc_id == "sber_2023"
     assert citation.year == 2023
     assert citation.issuer == "ПАО Сбербанк"

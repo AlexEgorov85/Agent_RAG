@@ -1,4 +1,4 @@
-"""Initial Streamlit chat UI for the ReportAgent service contract."""
+"""Начальный Streamlit-чат для контракта сервиса ReportAgent."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any
 
 try:
     from .citations import render_citations
-except ImportError:  # Streamlit may execute this file directly.
+except ImportError:  # Streamlit может исполнять этот файл напрямую.
     from citations import render_citations
 
 
@@ -22,7 +22,7 @@ _SECRET_KEY = re.compile(r"(api.?key|secret|token|password|credential)", re.IGNO
 
 
 def new_conversation_id() -> str:
-    """Create an opaque, unique identifier for an isolated conversation."""
+    """Создаёт непрозрачный уникальный ID изолированного диалога."""
     return str(uuid.uuid4())
 
 
@@ -31,7 +31,7 @@ def normalize_filters(
     issuers: Any = None,
     doc_ids: Any = None,
 ) -> dict[str, list[Any]]:
-    """Normalize visible UI selections into the AgentService filters mapping."""
+    """Приводит видимые выборки UI к словарю фильтров AgentService."""
     normalized: dict[str, set[Any]] = {}
     for key, values in (("years", years), ("issuers", issuers), ("allowed_doc_ids", doc_ids)):
         if values is None:
@@ -45,10 +45,10 @@ def normalize_filters(
 
 
 def build_service_filters(ui_filters: dict[str, Any], filters_factory: Any = None) -> Any:
-    """Build SearchFilters via an injected project model factory when available.
+    """Собирает SearchFilters через внедрённую фабрику модели, если она есть.
 
-    The fallback mapping uses the exact field names from spec_retrieval_engine.md,
-    allowing headless fakes before the backend model has landed.
+    Fallback-словарь использует точные имена полей из spec_retrieval_engine.md,
+    поэтому headless-заглушки работают ещё до появления backend-модели.
     """
     if not ui_filters:
         return None
@@ -67,7 +67,7 @@ _MISSING = object()
 
 
 def _event_get(event: Any, key: str, default: Any = None) -> Any:
-    """Read an event field directly first, then from its data payload."""
+    """Сначала читает поле события напрямую, затем из его ``data``."""
     if isinstance(event, Mapping):
         direct = event.get(key, _MISSING)
         data = event.get("data", _MISSING)
@@ -82,7 +82,7 @@ def _event_get(event: Any, key: str, default: Any = None) -> Any:
 
 
 def event_result(event: Any) -> Any:
-    """Return the terminal AgentRunResult without passing it through safe summaries."""
+    """Возвращает терминальный AgentRunResult без прохода через безопасные сводки."""
     return _event_get(event, "result")
 
 
@@ -101,7 +101,7 @@ def _event_name(event: Any) -> str:
 
 
 def _safe_text(value: Any, limit: int = 240) -> str:
-    """Bound text and redact common credential-shaped values."""
+    """Ограничивает текст и скрывает значения, похожие на учётные данные."""
     if not isinstance(value, str):
         return ""
     value = re.sub(r"(?i)(api[_ -]?key|token|secret|password)\s*[:=]\s*\S+", r"\1=[redacted]", value)
@@ -109,7 +109,7 @@ def _safe_text(value: Any, limit: int = 240) -> str:
 
 
 def safe_tool_arguments(arguments: Any) -> dict[str, Any]:
-    """Keep only short, non-secret tool arguments suitable for a visible trace."""
+    """Оставляет только короткие и не секретные аргументы для видимой трассы."""
     if not isinstance(arguments, Mapping):
         return {}
     safe: dict[str, Any] = {}
@@ -138,7 +138,7 @@ def safe_tool_arguments(arguments: Any) -> dict[str, Any]:
 
 
 def summarize_event(event: Any) -> dict[str, Any]:
-    """Convert one AgentEvent into a small UI-safe summary."""
+    """Превращает одно AgentEvent в компактную безопасную для UI сводку."""
     name = _event_name(event)
     summary: dict[str, Any] = {"event": name}
     if name == "run_started":
@@ -186,7 +186,7 @@ def _nonnegative_number(value: Any) -> int | float | None:
 
 
 def _resolve_service_factory() -> Any:
-    """Load the one documented integration hook, if the agent package is present."""
+    """Загружает единственный документированный хук интеграции, если пакет агента есть."""
     try:
         module = importlib.import_module("src.agent.service")
     except ImportError:
@@ -203,20 +203,20 @@ def _make_service(agent_service: Any, service_factory: Any) -> Any:
         try:
             return factory()
         except Exception:
-            # Do not expose backend exception text, which may contain sensitive values.
+            # Не показываем текст исключения backend: он может содержать секреты.
             return None
     return None
 
 
 def _answer_payload(value: Any) -> Any:
-    """Unwrap only conventional result/answer containers from the stated contract."""
+    """Раскрывает только обычные контейнеры result/answer из заявленного контракта."""
     if value is None:
         return None
     nested = _get(value, "result")
     if nested is not None:
         value = nested
-    # An Answer itself has status/citations. Preserve that object rather than
-    # unwrapping its `answer` text field.
+    # У самого Answer есть status/citations. Сохраняем этот объект, а не
+    # разворачиваем его текстовое поле `answer`.
     if _get(value, "status") in {"answer", "abstain"} and _get(value, "citations") is not None:
         return value
     answer = _get(value, "answer")
@@ -339,8 +339,8 @@ def _call_agent(service: Any, query: str, conversation_id: str, filters: Any, st
                     if isinstance(event_warnings, (list, tuple)):
                         warnings.extend(event_warnings)
 
-            # Streamlit owns incremental rendering. The fallback keeps the same
-            # event semantics for small injected test doubles/older installations.
+            # Инкрементальную отрисовку ведёт Streamlit. Fallback сохраняет ту же
+            # семантику событий для маленьких тестовых заглушек/старых версий.
             if callable(getattr(st, "write_stream", None)):
                 st.write_stream(visible_deltas())
             else:
@@ -427,7 +427,7 @@ def main(
     filters_factory: Any = None,
     st_module: Any = None,
 ) -> None:
-    """Render the app; dependencies are injectable for headless tests."""
+    """Отрисовывает приложение; зависимости внедряются для headless-тестов."""
     if st_module is None:
         try:
             import streamlit as st_module
@@ -489,8 +489,8 @@ def main(
             response = _call_agent(service, query, state.conversation_id, service_filters, st)
             if response:
                 state.messages.append({"role": "assistant", **response})
-        # Backend conversation memory is isolated by conversation_id and owned by
-        # AgentService; the UI stores only the visible chat transcript.
+        # Память диалога backend изолирована по conversation_id и принадлежит
+        # AgentService; UI хранит только видимую историю чата.
 
 
 if __name__ == "__main__":

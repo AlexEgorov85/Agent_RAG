@@ -1,8 +1,8 @@
-"""A BM25Okapi index for mapping-style chunks.
+"""Индекс BM25Okapi по чанкам-словарям.
 
-Chunks use the project contract: ``chunk_id`` and ``text`` are top-level
-fields; these fields may also be supplied under a ``metadata`` mapping.
-Russian tokenization optionally uses pymorphy3 before BM25Okapi indexing.
+Чанки используют контракт проекта: ``chunk_id`` и ``text`` лежат на верхнем
+уровне; эти же поля могут быть внутри ``metadata``. Русская токенизация
+опционально использует pymorphy3 перед индексацией BM25Okapi.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ _TOKEN_PATTERN = re.compile(r"[^\W_]+", flags=re.UNICODE)
 
 
 def _surface_tokens(text: str) -> list[str]:
-    """Return lowercase Unicode word tokens, normalizing Russian ё to е."""
+    """Возвращает строчные Unicode-слова, нормализуя русскую «ё» в «е»."""
     if not isinstance(text, str):
         raise TypeError("text must be a string")
     return [token.replace("ё", "е") for token in _TOKEN_PATTERN.findall(text.lower())]
@@ -29,7 +29,7 @@ def _surface_tokens(text: str) -> list[str]:
 
 @lru_cache(maxsize=1)
 def _morph_analyzer() -> Any | None:
-    """Create a cached pymorphy3 analyzer when the optional package is present."""
+    """Создаёт кэшированный анализатор pymorphy3, если пакет установлен."""
     try:
         import pymorphy3  # type: ignore[import-not-found]
 
@@ -39,11 +39,11 @@ def _morph_analyzer() -> Any | None:
 
 
 def tokenize(text: str) -> list[str]:
-    """Tokenize text and lemmatize Russian words when pymorphy3 is available.
+    """Токенизирует текст и лемматизирует русские слова, если есть pymorphy3.
 
-    If pymorphy3 is missing or cannot analyze an individual token, its
-    normalized surface form is retained. This keeps indexing and query
-    processing usable without network access or optional NLP dependencies.
+    Если pymorphy3 нет или слово не разбирается, остаётся нормализованная
+    поверхностная форма. Так индексация и запросы работают без сети и
+    необязательных NLP-зависимостей.
     """
     words = _surface_tokens(text)
     analyzer = _morph_analyzer()
@@ -56,18 +56,18 @@ def tokenize(text: str) -> list[str]:
             lemma = analyzer.parse(word)[0].normal_form
             normalized.append(str(lemma).replace("ё", "е").lower() if lemma else word)
         except Exception:
-            # A malformed/unrecognized token must not make retrieval fail.
+            # Битый/нераспознанный токен не должен ронять поиск.
             normalized.append(word)
     return normalized
 
 
 def lemmatize(text: str) -> list[str]:
-    """Return the same Russian-aware normalized token sequence as ``tokenize``."""
+    """Возвращает ту же нормализованную последовательность токенов, что ``tokenize``."""
     return tokenize(text)
 
 
 def _field(chunk: Chunk, name: str) -> Any:
-    """Read a field from the chunk itself, then its optional metadata mapping."""
+    """Читает поле из чанка, затем из его необязательного ``metadata``."""
     if name in chunk:
         return chunk[name]
     metadata = chunk.get("metadata")
@@ -77,11 +77,11 @@ def _field(chunk: Chunk, name: str) -> Any:
 
 
 class BM25Index:
-    """In-memory BM25Okapi index over mapping-style chunks.
+    """Индекс BM25Okapi в памяти по чанкам-словарям.
 
-    The corpus statistics are computed once at construction. Eligibility is
-    applied to scored corpus entries at search time, before truncating to
-    ``k``; it does not rebuild or renormalize the index.
+    Статистика корпуса считается один раз при создании. Фильтр применимости
+    проверяется при поиске уже после оценки, но до обрезки до ``k``; индекс при
+    этом не перестраивается и не перенормируется.
     """
 
     def __init__(
@@ -125,11 +125,11 @@ class BM25Index:
         k: int = 20,
         eligible: Eligibility = None,
     ) -> list[dict[str, Any]]:
-        """Return up to ``k`` positive-score chunks, best first.
+        """Возвращает до ``k`` чанков с положительным score, лучшие первыми.
 
-        ``eligible`` may be a predicate over chunks or a collection of
-        eligible chunk IDs / corpus indices. Result dictionaries are shallow
-        copies of source chunks with a numeric ``score`` field added.
+        ``eligible`` — предикат по чанку либо коллекция допустимых ``chunk_id``
+        или индексов корпуса. Результаты — поверхностные копии исходных чанков
+        с добавленным числовым полем ``score``.
         """
         if k < 0:
             raise ValueError("k must be non-negative")
@@ -152,8 +152,8 @@ class BM25Index:
                 value for value in values if isinstance(value, int) and not isinstance(value, bool)
             }
 
-        # BM25Okapi retains corpus-wide statistics; filter its scores before
-        # sorting/truncation so eligibility never causes a top-k shortfall.
+        # BM25Okapi хранит статистику по всему корпусу, поэтому фильтруем его
+        # оценки до сортировки/обрезки: иначе фильтр мог бы недобрать top-k.
         if not self._bm25.avgdl or not any(
             term in self._bm25.idf for term in query_terms
         ):
@@ -173,8 +173,8 @@ class BM25Index:
             if score > 0:
                 scored.append((score, self._ids[index], index))
 
-        # Chunk ID ordering is deterministic for equal scores; corpus position
-        # breaks ties for any repeated IDs in malformed input.
+        # При равных score порядок задаёт chunk_id, а позиция в корпусе
+        # разрешает ничьи для повторяющихся ID в некорректных данных.
         scored.sort(key=lambda item: (-item[0], item[1], item[2]))
         return [
             {**dict(self.chunks[index]), "score": score}
@@ -189,6 +189,6 @@ def keyword_search(
     k: int = 20,
     eligible: Eligibility = None,
 ) -> list[dict[str, Any]]:
-    """Convenience search API; reuse ``BM25Index`` for repeated queries."""
+    """Удобный поисковый API; для повторных запросов переиспользуйте ``BM25Index``."""
     index = chunks if isinstance(chunks, BM25Index) else BM25Index(chunks)
     return index.search(query, k=k, eligible=eligible)

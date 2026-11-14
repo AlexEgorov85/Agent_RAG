@@ -1,7 +1,7 @@
-"""Explicit smoke test for the configured embeddings and reranker APIs.
+"""Явный smoke-тест настроенных API эмбеддингов и реранкера.
 
-Run with ``python -m scripts.smoke_api --live``. The script makes real API
-requests only when ``--live`` is supplied and never prints credentials.
+Запуск: ``python -m scripts.smoke_api --live``. Реальные запросы к API
+выполняются только с ``--live``; учётные данные никогда не печатаются.
 """
 
 from __future__ import annotations
@@ -19,14 +19,14 @@ from src.retrieval.reranker import LLMReranker
 
 @dataclass(frozen=True)
 class SmokeResult:
-    """Safe summary of completed smoke checks; contains no request secrets."""
+    """Безопасная сводка выполненных проверок; не содержит секретов запроса."""
 
     embedding_dimensions: int | None
     reranked_chunk_ids: tuple[str, ...] | None
 
 
 class SmokeFailure(RuntimeError):
-    """A deliberately sanitized smoke-test failure category."""
+    """Намеренно очищенная категория сбоя smoke-теста."""
 
     def __init__(self, stage: str, category: str) -> None:
         super().__init__(category)
@@ -35,7 +35,7 @@ class SmokeFailure(RuntimeError):
 
 
 def _safe_reranker_failure_category(warning: str | None) -> str:
-    """Classify reranker failure without exposing provider response bodies."""
+    """Классифицирует сбой реранкера, не раскрывая тела ответов провайдера."""
     message = warning or ""
     status = re.search(r"(?:Error code:\s*|HTTP\s+)(\d{3})", message, re.IGNORECASE)
     if status:
@@ -57,10 +57,10 @@ def run_smoke(
     check_embeddings: bool = True,
     check_reranker: bool = True,
 ) -> SmokeResult:
-    """Run selected checks using an injected OpenAI-compatible client.
+    """Выполняет выбранные проверки через переданный OpenAI-совместимый клиент.
 
-    This function is independently testable with a fake client and does not
-    load environment variables or create a client.
+    Функцию можно независимо тестировать с заглушкой клиента; она не читает env
+    и не создаёт клиент сама.
     """
     if not check_embeddings and not check_reranker:
         raise ValueError("enable at least one API check")
@@ -117,28 +117,28 @@ def run_smoke(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Create the command-line parser; live API use requires explicit opt-in."""
+    """Создаёт парсер CLI; реальные запросы требуют явного ``--live``."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--live",
         action="store_true",
-        help="Allow real API requests (one embedding request and/or reranker call).",
+        help="Разрешить реальные запросы к API (один запрос эмбеддингов и/или вызов реранкера).",
     )
     parser.add_argument(
         "--no-embeddings",
         action="store_true",
-        help="Skip the embeddings endpoint check.",
+        help="Пропустить проверку эндпоинта эмбеддингов.",
     )
     parser.add_argument(
         "--no-reranker",
         action="store_true",
-        help="Skip the reranker chat-completions check.",
+        help="Пропустить проверку chat-completions реранкера.",
     )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Load local env settings and run the explicitly requested smoke checks."""
+    """Загружает локальные env-настройки и выполняет явно запрошенные проверки."""
     args = build_parser().parse_args(argv)
     if not args.live:
         print("No API request was made. Pass --live to run the smoke test.")
@@ -174,7 +174,7 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
-    except Exception as exc:  # noqa: BLE001 - never print provider payloads/secrets
+    except Exception as exc:  # noqa: BLE001 — никогда не печатаем тела ответов/секреты
         print(f"API smoke test failed ({type(exc).__name__}).", file=sys.stderr)
         return 1
 
@@ -185,5 +185,5 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-if __name__ == "__main__":  # pragma: no cover - covered through main/run_smoke
+if __name__ == "__main__":  # pragma: no cover — покрыто через main/run_smoke
     raise SystemExit(main())

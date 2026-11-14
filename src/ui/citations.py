@@ -1,4 +1,4 @@
-"""Pure helpers for displaying citations without requiring Streamlit."""
+"""Чистые помощники отрисовки цитат без зависимости от Streamlit."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ def _value(item: Any, key: str, default: Any = None) -> Any:
 
 
 def citation_metadata(citation: Any) -> dict[str, Any]:
-    """Return only the citation metadata defined by the Answer contract."""
+    """Возвращает только метаданные цитаты, определённые контрактом Answer."""
     metadata = {
         "chunk_id": _value(citation, "chunk_id"),
         "doc_id": _value(citation, "doc_id"),
@@ -27,7 +27,7 @@ def citation_metadata(citation: Any) -> dict[str, Any]:
 
 
 def citation_quote(citation: Any) -> str | None:
-    """Return the short quote supplied on the citation, never an inferred chunk."""
+    """Возвращает короткую цитату из самой ссылки, не подставляя чанк по догадке."""
     quote = _value(citation, "quote")
     if not isinstance(quote, str):
         return None
@@ -36,10 +36,10 @@ def citation_quote(citation: Any) -> str | None:
 
 
 def render_citations(st: Any, citations: Any) -> None:
-    """Render Answer citations as metadata and expandable quote cards.
+    """Отрисовывает цитаты Answer как метаданные и раскрываемые карточки с цитатой.
 
-    The agent service's contract supplies quote snippets, not a chunk-store
-    resolver. This helper deliberately doesn't invent or fetch full chunk text.
+    Контракт сервиса агента даёт короткие фрагменты, а не резолвер хранилища
+    чанков. Помощник намеренно не придумывает и не загружает полный текст чанка.
     """
     if not citations:
         return

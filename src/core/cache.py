@@ -1,4 +1,4 @@
-"""Content-addressed embedding cache with atomic writes."""
+"""Кэш эмбеддингов, адресуемый по содержимому, с атомарной записью."""
 
 from __future__ import annotations
 
@@ -24,10 +24,10 @@ def _chunk_id(chunk: Mapping[str, Any]) -> str:
 def corpus_fingerprint(chunks: Sequence[Mapping[str, Any]], model: str,
                        embedding_config: Mapping[str, Any] | None = None,
                        source_hashes: Mapping[str, str] | None = None) -> str:
-    """Hash chunk content, model, config and source hashes order-independently.
+    """Хеширует содержимое чанков, модель, конфигурацию и хеши источников.
 
-    Image payloads are deliberately excluded: they do not affect embeddings and
-    would otherwise invalidate a cache after a parser image-payload change.
+    Порядок чанков не важен. Base64-картинки намеренно исключены: они не влияют
+    на эмбеддинги и иначе сбрасывали бы кэш при смене настройки payload.
     """
     ordered = sorted(chunks, key=_chunk_id)
     if source_hashes is None:
@@ -94,7 +94,7 @@ def _cache_target(cache_path: Path, fingerprint: str) -> Path:
 def cached_document_vectors(chunks: Sequence[Mapping[str, Any]],
                             embeddings: Any, cache_path: Path,
                             batch_size: int = 8) -> dict[str, list[float]]:
-    """Return ``chunk_id → vector`` from cache or in batches."""
+    """Возвращает ``chunk_id → vector`` из кэша или считает их батчами."""
     if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size < 1:
         raise ValueError("batch_size must be a positive integer")
     if not chunks:
@@ -116,8 +116,8 @@ def cached_document_vectors(chunks: Sequence[Mapping[str, Any]],
                     by_id = dict(zip(cached_ids, vectors, strict=True))
                     return {chunk_id: by_id[chunk_id] for chunk_id in chunk_ids}
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            # A corrupt/stale cache is rebuilt; existing content is only
-            # replaced after a fully successful rebuild.
+            # Повреждённый или устаревший кэш пересобирается; старый файл
+            # заменяется только после полностью успешной пересборки.
             pass
 
     vectors: list[list[float]] = []

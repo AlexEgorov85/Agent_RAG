@@ -1,4 +1,4 @@
-"""Backend RAG engine: retrieval -> whole-chunk packing -> grounded answer."""
+"""Бэкенд RAG: поиск → упаковка целыми чанками → обоснованный ответ."""
 
 from __future__ import annotations
 
@@ -92,11 +92,11 @@ def _safe_abstain(text: str, warning: str) -> Answer:
 
 
 class RAGEngine:
-    """Compose an injected retriever and answerer without building either.
+    """Связывает переданные retriever и answerer, не создавая их сам.
 
-    ``conversation_id`` is accepted for API parity with ``AgentService``. This
-    backend component does not persist conversation history; callers that need
-    follow-up resolution pass the history directly to ``AnswerGenerator``.
+    ``conversation_id`` принимается для совместимости API с ``AgentService``.
+    Этот backend-компонент не хранит историю диалога; для разрешения уточнений
+    вызывающий передаёт историю напрямую в ``AnswerGenerator``.
     """
 
     def __init__(
@@ -105,6 +105,7 @@ class RAGEngine:
         generator: Any,
         *,
         max_context_chars: int = DEFAULT_MAX_CONTEXT_CHARS,
+        max_context_tokens: int | None = None,
     ) -> None:
         if retriever is None:
             raise ValueError("retriever is required")
@@ -116,14 +117,24 @@ class RAGEngine:
             raise ValueError("max_context_chars must be a non-negative integer")
         if max_context_chars < 0:
             raise ValueError("max_context_chars must be a non-negative integer")
+        if max_context_tokens is not None:
+            if isinstance(max_context_tokens, bool) or not isinstance(
+                max_context_tokens, int
+            ):
+                raise ValueError(
+                    "max_context_tokens must be a non-negative integer or None")
+            if max_context_tokens < 0:
+                raise ValueError(
+                    "max_context_tokens must be a non-negative integer or None")
         self.retriever = retriever
         self.generator = generator
         self.max_context_chars = max_context_chars
+        self.max_context_tokens = max_context_tokens
 
     def retrieve(
         self, query: str, *, filters: SearchFilters | None = None
     ) -> Any:
-        """Delegate retrieval only; never calls the generator."""
+        """Только делегирует поиск; генератор никогда не вызывает."""
         if not isinstance(query, str):
             raise TypeError("query must be a string")
         return self.retriever.retrieve(query, filters=filters)
@@ -135,24 +146,31 @@ class RAGEngine:
         filters: SearchFilters | None = None,
         conversation_id: str | None = None,
     ) -> Answer:
-        """Retrieve, pack, and generate an answer or an informative abstain."""
+        """Ищет, упаковывает контекст и формирует ответ или информативный abstain."""
         if not isinstance(question, str) or not question.strip():
             raise ValueError("question must be a non-empty string")
-        del conversation_id  # Accepted for API parity; no history is persisted.
+        del conversation_id  # Принят для совместимости API; история не хранится.
 
         result = self.retrieve(question, filters=filters)
         hits = getattr(result, "hits", None) or []
-        packed = pack_context(hits, max_chars=self.max_context_chars)
+        packed = pack_context(
+            hits,
+            max_chars=self.max_context_chars,
+            max_tokens=self.max_context_tokens,
+        )
         _LOGGER.info(
-            "rag context packed: used_chars=%d max_chars=%d included=%d skipped=%d",
+            "rag context packed: used_chars=%d max_chars=%d "
+            "used_tokens=%d max_tokens=%s included=%d skipped=%d",
             packed.manifest.used_chars,
             packed.manifest.max_chars,
+            packed.manifest.used_tokens,
+            packed.manifest.max_tokens,
             len(packed.manifest.included),
             len(packed.manifest.skipped),
         )
         if not packed.records:
-            # Never let the model supplement an empty retrieval from its own
-            # knowledge: abstain locally and skip the provider call entirely.
+            # Не позволяем модели дополнять пустой поиск своими знаниями:
+            # сразу отказываем локально и вовсе не вызываем провайдера.
             return _safe_abstain(NO_EVIDENCE_TEXT, "no_evidence")
 
         evidence = packed.evidence
@@ -195,18 +213,21 @@ def build_engine(
     client: Any | None = None,
     model: str | None = None,
     max_context_chars: int = DEFAULT_MAX_CONTEXT_CHARS,
+    max_context_tokens: int | None = None,
 ) -> RAGEngine:
-    """Build a ``RAGEngine`` from already-created components.
+    """Собирает ``RAGEngine`` из уже созданных компонентов.
 
-    Provide either a ready ``generator`` or an already-configured OpenAI client
-    plus ``model``. No environment variables, clients, indexes, or network
-    calls are created implicitly.
+    Передайте готовый ``generator`` либо настроенный OpenAI-клиент вместе с
+    ``model``. Переменные окружения, клиенты, индексы и сетевые вызовы
+    неявно не создаются.
     """
     if generator is not None:
         if client is not None or model is not None:
             raise ValueError("provide either generator or client/model, not both")
         return RAGEngine(
-            retriever, generator, max_context_chars=max_context_chars
+            retriever, generator,
+            max_context_chars=max_context_chars,
+            max_context_tokens=max_context_tokens,
         )
     if client is None or model is None:
         raise ValueError("generator or client and model are required")
@@ -216,6 +237,8 @@ def build_engine(
             client,
             model,
             max_context_chars=max_context_chars,
+            max_context_tokens=max_context_tokens,
         ),
         max_context_chars=max_context_chars,
+        max_context_tokens=max_context_tokens,
     )

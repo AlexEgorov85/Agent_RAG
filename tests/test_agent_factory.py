@@ -1,4 +1,4 @@
-"""Offline tests for the local-corpus AgentService factory."""
+"""Офлайн-тесты фабрики AgentService на локальном корпусе."""
 
 from __future__ import annotations
 
@@ -102,7 +102,9 @@ def _settings(tmp_path: Path) -> RAGSettings:
 def test_factory_builds_service_and_answers_with_citation(
     tmp_path: Path, fake_client: Any
 ) -> None:
-    service = create_agent_service(settings=_settings(tmp_path), client=fake_client)
+    service = create_agent_service(
+        settings=_settings(tmp_path), client=fake_client, use_reranker=False
+    )
 
     result = service.ask("Какая чистая прибыль за 2023 год?", conversation_id="c1")
 
@@ -115,8 +117,27 @@ def test_factory_builds_service_and_answers_with_citation(
     assert [c.chunk_id for c in result.answer.citations] == ["sber_2023:00001:c0"]
     assert result.answer.citations[0].page_pdf == 8
     assert [event.tool_name for event in result.tool_events] == ["search_reports"]
-    # The factory must not enable the unavailable reranker by default.
+    # Для этого детерминированного теста реранкер явно отключён.
     assert service.tools.search_backend.reranker is None
+
+
+def test_reranker_is_enabled_by_default_and_can_be_disabled(
+    tmp_path: Path, fake_client: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = _settings(tmp_path)
+
+    monkeypatch.delenv("RERANK_ENABLED", raising=False)
+    default_service = create_agent_service(settings=settings, client=fake_client)
+    assert default_service.tools.search_backend.reranker is not None
+
+    disabled_service = create_agent_service(
+        settings=settings, client=fake_client, use_reranker=False
+    )
+    assert disabled_service.tools.search_backend.reranker is None
+
+    monkeypatch.setenv("RERANK_ENABLED", "0")
+    env_disabled = create_agent_service(settings=settings, client=fake_client)
+    assert env_disabled.tools.search_backend.reranker is None
 
 
 def test_factory_requires_a_built_corpus(tmp_path: Path, fake_client: Any) -> None:

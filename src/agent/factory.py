@@ -163,7 +163,8 @@ def create_agent_service(
         graph_dir: Каталог артефактов графа (по умолчанию ``data/graph``).
         cache_dir: Каталог кэша векторов; по умолчанию ``RAGSettings.cache_dir``.
         client: Готовый OpenAI-совместимый клиент (для тестов/smoke).
-        use_reranker: Включить LLM-реранкер. ``None`` — из env ``RERANK_ENABLED``.
+        use_reranker: Включить LLM-реранкер. ``None`` — из env ``RERANK_ENABLED``
+            (по умолчанию включён; ``0`` отключает).
         settings: Готовая конфигурация (для тестов).
 
     Returns:
@@ -204,12 +205,15 @@ def create_agent_service(
     bm25 = BM25Index(chunks)
 
     if use_reranker is None:
-        use_reranker = os.getenv("RERANK_ENABLED", "0").strip() == "1"
+        # Реранкер есть в production и включён по умолчанию; явное
+        # ``RERANK_ENABLED=0`` отключает его (например, ради latency/cost).
+        use_reranker = os.getenv("RERANK_ENABLED", "1").strip() == "1"
     reranker = None
     if use_reranker and settings.rerank_model:
         from src.retrieval.reranker import LLMReranker
 
-        reranker = LLMReranker(client, settings.rerank_model)
+        reranker = LLMReranker(
+            client, settings.rerank_model, allow_missing_scores=True)
 
     retriever = HybridRetriever(
         dense,
@@ -232,5 +236,6 @@ def create_agent_service(
         client,
         settings.model,
         max_context_chars=settings.context_chars,
+        max_context_tokens=settings.context_tokens,
     )
     return AgentService(tools, answerer=answerer)

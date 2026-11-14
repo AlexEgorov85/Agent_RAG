@@ -1,7 +1,7 @@
-"""Public synchronous AgentService API and safe streaming events.
+"""Публичный синхронный API AgentService и безопасные потоковые события.
 
-``create_agent_service`` is the UI entry point: it lazily imports the local
-corpus/API factory so importing this module never reads env or builds indexes.
+``create_agent_service`` — точка входа для UI: фабрика корпуса/API импортируется
+лениво, поэтому импорт этого модуля не читает env и не строит индексы.
 """
 
 from __future__ import annotations
@@ -116,13 +116,13 @@ def _answer_from(value: Any) -> Answer:
 
 
 class AgentService:
-    """Orchestrate an injected tool set and optional answer generator.
+    """Оркестрирует переданный набор инструментов и необязательный генератор ответа.
 
-    No retrieval engine, model, or network client is constructed implicitly.
-    A fresh run state is used for every turn; LangGraph checkpoint keys include
-    conversation_id to isolate state when a saver is supplied.
-    The terminal ``run_completed`` event includes its complete ``AgentRunResult``
-    in ``AgentEvent.result`` so clients can render validated citations/status.
+    Движок поиска, модель и сетевой клиент сами не создаются. На каждый ход
+    берётся свежее состояние; ключ checkpoint LangGraph содержит
+    ``conversation_id``, чтобы изолировать беседы при наличии saver.
+    Терминальное событие ``run_completed`` содержит полный ``AgentRunResult``
+    в ``AgentEvent.result`` для отрисовки проверенных цитат и статуса.
     """
 
     def __init__(
@@ -172,8 +172,8 @@ class AgentService:
         events = list(self.stream(query, conversation_id=conversation_id, filters=filters))
         if events and events[-1].result is not None:
             return events[-1].result
-        # Internal event delivery must never prevent a result; a safe failed
-        # result is returned if graph execution itself could not complete.
+        # Доставка внутренних событий не должна мешать результату: если граф
+        # не смог отработать, возвращаем безопасный результат со статусом failed.
         request_id = events[0].request_id if events else str(uuid.uuid4())
         return AgentRunResult(
             request_id=request_id,
@@ -255,7 +255,7 @@ class AgentService:
                     status=status,
                 )
             except Exception:
-                # Never leak raw exception text, tracebacks, or provider bodies.
+                # Не допускаем утечки текста исключений, traceback и тел ответов.
                 result = AgentRunResult(
                     request_id=request_id,
                     conversation_id=conversation_id,
@@ -358,8 +358,8 @@ class AgentService:
                         for item in state.get("history", [])
                     ]
             except (TypeError, ValueError):
-                # Legacy/simple callables continue to receive only the original
-                # three positional arguments.
+                # Старые/простые callable по-прежнему получают только исходные
+                # три позиционных аргумента.
                 pass
             return target(state["question"], evidence, manifest, **kwargs)
 

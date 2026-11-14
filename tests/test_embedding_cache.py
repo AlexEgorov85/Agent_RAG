@@ -1,4 +1,4 @@
-"""Offline tests for embedding adaptation and vector cache behavior."""
+"""Офлайн-тесты адаптера эмбеддингов и работы кэша векторов."""
 
 from __future__ import annotations
 

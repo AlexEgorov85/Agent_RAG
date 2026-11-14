@@ -1,8 +1,8 @@
-"""Prompts for grounded, citation-only answer generation.
+"""Промпты для обоснованных ответов только по цитатам.
 
-Source chunks are untrusted data. The system prompt fixes the output schema and
-all answering rules; the user message carries only the question, the packed
-sources that are allowed to be cited, and a bounded recent dialogue.
+Исходные чанки — недоверенные данные. Системный промпт задаёт схему вывода и
+все правила ответа; пользовательское сообщение содержит только вопрос,
+разрешённые к цитированию упакованные источники и ограниченный недавний диалог.
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ REPAIR_INSTRUCTION = (
 
 
 def _bounded_history(history: Sequence[Mapping[str, Any]] | None) -> list[dict[str, str]]:
-    """Keep only recent, bounded user/assistant turns as dialogue context."""
+    """Оставляет только недавние ограниченные реплики пользователя и ассистента."""
     if not history:
         return []
     bounded: list[dict[str, str]] = []
@@ -92,10 +92,10 @@ def build_user_prompt(
     history: Sequence[Mapping[str, Any]] | None = None,
     repair: bool = False,
 ) -> str:
-    """Render the user message with bounded question, sources, and history.
+    """Собирает пользовательское сообщение с ограниченными вопросом, источниками и историей.
 
-    ``sources`` must already be filtered to the evidence manifest and packed by
-    :func:`src.engine.context.pack_context`; this function does not add chunks.
+    ``sources`` уже должны быть отфильтрованы по манифесту свидетельств и
+    упакованы :func:`src.engine.context.pack_context`; функция не добавляет чанки.
     """
     payload: dict[str, Any] = {
         "question": question[:MAX_QUESTION_CHARS],

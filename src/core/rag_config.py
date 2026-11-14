@@ -42,6 +42,21 @@ class RAGSettings(BaseSettings):
     candidates: int = 20
     rerank_pool: int = 10
     context_chars: int = 16000
+    #: Полное окно модели в токенах (для Cloud.ru GigaChat-3-Pro — 32k).
+    context_window_tokens: int = 32768
+    #: Резерв под ответ и системный промпт; контекст получает остаток.
+    output_tokens: int = 2048
+    context_reserve_tokens: int = 2048
+
+    @property
+    def context_tokens(self) -> int:
+        """Сколько токенов реально доступно под упакованные чанки."""
+        return max(
+            0,
+            self.context_window_tokens
+            - self.output_tokens
+            - self.context_reserve_tokens,
+        )
 
     chunks_dir: Path = Path("data/dev/chunks")
     cache_dir: Path = Path("data/dev/cache")

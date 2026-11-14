@@ -1,4 +1,4 @@
-"""Hybrid BM25 + dense retrieval with RRF fusion and optional LLM reranking."""
+"""Гибридный поиск BM25 + dense с RRF-слиянием и опциональным LLM-реранкингом."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ RRF_CONSTANT = 60
 
 @dataclass(frozen=True)
 class RerankResult:
-    """Reranker result contract; both fake and real rerankers satisfy it."""
+    """Контракт результата реранкера; ему соответствуют и заглушки, и реальные реранкеры."""
 
     hits: list[dict[str, Any]] = field(default_factory=list)
     used_fallback: bool = False
@@ -24,7 +24,7 @@ DEFAULT_TOP_K = 5
 
 @dataclass(frozen=True)
 class SearchFilters:
-    """Hard metadata/structure restrictions applied before top-k."""
+    """Жёсткие ограничения по метаданным/структуре до отбора top-k."""
 
     years: set[int] | None = None
     year_from: int | None = None
@@ -47,7 +47,7 @@ class SearchFilters:
             raise ValueError("years must contain integers")
 
     def normalized(self) -> "SearchFilters":
-        """Return a validated copy with set fields normalized to sets."""
+        """Возвращает проверенную копию с множествами, приведёнными к типу ``set``."""
         from dataclasses import replace
 
         return replace(
@@ -68,7 +68,7 @@ class SearchFilters:
         )
 
     def requested_years(self) -> set[int]:
-        """Years explicitly requested by either exact set or range."""
+        """Годы, явно запрошенные точным набором или диапазоном."""
         if self.years:
             return set(self.years)
         if self.year_from is not None or self.year_to is not None:
@@ -80,7 +80,7 @@ class SearchFilters:
 
 @dataclass(frozen=True)
 class RetrievalHit:
-    """One fused candidate with independent channel diagnostics."""
+    """Один слитый кандидат с независимой диагностикой по каналам."""
 
     chunk_id: str
     chunk: Mapping[str, Any]
@@ -95,7 +95,7 @@ class RetrievalHit:
 
 @dataclass
 class RetrievalTrace:
-    """Counts and failure flags for observability."""
+    """Счётчики и флаги сбоев для наблюдаемости."""
 
     fused_candidates: int = 0
     rerank_candidates: int = 0
@@ -111,7 +111,7 @@ class RetrievalTrace:
 
 @dataclass(frozen=True)
 class RetrievalResult:
-    """Retrieval hits plus warnings, effective filters and trace."""
+    """Хиты поиска, предупреждения, действующие фильтры и трейс."""
 
     hits: list[RetrievalHit]
     warnings: list[str] = field(default_factory=list)
@@ -196,7 +196,7 @@ def _matches(chunk: Mapping[str, Any], filters: SearchFilters) -> bool:
 
 
 def _edit_distance(left: str, right: str) -> int:
-    """Levenshtein distance for bounded candidate-id repair."""
+    """Расстояние Левенштейна для ограниченного исправления ID кандидатов."""
     if left == right:
         return 0
     if abs(len(left) - len(right)) > 1:
@@ -216,10 +216,11 @@ def _edit_distance(left: str, right: str) -> int:
 
 def _repair_candidate_ids(returned: Sequence[str],
                           expected: set[str]) -> list[str] | None:
-    """Map near-miss provider ids (one typo) back to real candidates.
+    """Сопоставляет почти совпавшие ID провайдера (одна опечатка) реальным кандидатам.
 
-    The reranker must not add/remove chunks; a single-character typo in a long
-    ``chunk_id`` is repaired only when it maps unambiguously to one candidate.
+    Реранкер не должен добавлять/удалять чанки; опечатка в один символ внутри
+    длинного ``chunk_id`` исправляется, только если однозначно указывает на
+    одного кандидата.
     """
     used: set[str] = set()
     repaired: list[str] = []
@@ -245,7 +246,7 @@ def _strip_scores(chunk: Mapping[str, Any]) -> dict[str, Any]:
 
 
 class HybridRetriever:
-    """BM25 + dense → RRF → optional reranker, with graceful degradation."""
+    """BM25 + dense → RRF → опциональный реранкер, с мягкой деградацией."""
 
     def __init__(self, dense_index: Any, bm25_index: Any, embedder: Any, *,
                  reranker: Any = None, candidates: int = DEFAULT_CANDIDATES,
@@ -273,7 +274,7 @@ class HybridRetriever:
 
     def retrieve(self, query: str, *, filters: SearchFilters | None = None,
                  top_k: int | None = None) -> RetrievalResult:
-        """Retrieve top-k fused candidates and diagnose missing years."""
+        """Возвращает top-k слитых кандидатов и диагностирует отсутствующие годы."""
         effective = filters or SearchFilters()
         warnings: list[str] = []
         trace = RetrievalTrace()
@@ -285,7 +286,7 @@ class HybridRetriever:
             query_vector = self.embedder.embed_query(query)
             dense_hits = list(self.dense_index.search(
                 query_vector, k=self.candidates, eligible=eligible))
-        except Exception as exc:  # noqa: BLE001 - one channel must not block baseline
+        except Exception as exc:  # noqa: BLE001 — один канал не должен блокировать базовый поиск
             trace.dense_failed = True
             trace.dense_error_type = type(exc).__name__
             warnings.append(f"Dense retrieval failed ({type(exc).__name__})")
@@ -370,7 +371,7 @@ class HybridRetriever:
                         raise ValueError("reranker hits must be mappings")
                     selected = [dict(hit) for hit in result.hits]
                     trace.reranker_status = "ok"
-            except Exception as exc:  # noqa: BLE001 - reranker is optional
+            except Exception as exc:  # noqa: BLE001 — реранкер необязателен
                 trace.reranker_used_fallback = True
                 trace.reranker_status = "fallback"
                 trace.reranker_error_type = type(exc).__name__

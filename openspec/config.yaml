@@ -1,32 +1,32 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
+# Контекст проекта (необязательно)
+# Показывается ИИ при создании артефактов.
+# Добавьте стек, соглашения, стиль, знания о предметной области и т.п.
+# Пример:
 #   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+#     Стек: TypeScript, React, Node.js
+#     Используем conventional commits
+#     Домен: платформа электронной коммерции
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
+# Правила для артефактов (необязательно)
+# Добавьте собственные правила для конкретных артефактов.
+# Пример:
 #   rules:
 #     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
+#       - Держать предложения короче 500 слов
+#       - Всегда включать раздел «Не цели»
 #     tasks:
-#       - Break tasks into chunks of max 2 hours
+#       - Дробить задачи на части не более чем по 2 часа
 
-# Per-operation guidance (optional)
-# Add advisory guidance for how apply and archive work should be conducted.
-# This is separate from artifact rules above.
-# Example:
+# Указания для операций (необязательно)
+# Добавьте рекомендации, как выполнять apply и archive.
+# Это отдельно от правил артефактов выше.
+# Пример:
 #   operations:
 #     apply:
 #       guidance:
-#         - Keep test summaries concise
+#         - Кратко формулировать итоги тестов
 #     archive:
 #       guidance:
-#         - Summarize the archive outcome before finishing
+#         - Резюмировать результат архивации перед завершением

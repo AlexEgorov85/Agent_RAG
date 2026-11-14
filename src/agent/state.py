@@ -1,4 +1,4 @@
-"""Typed public and graph-state contracts for the report agent."""
+"""Типизированные публичные контракты и состояние графа агента отчётов."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ AnswerStatus = Literal["answer", "abstain"]
 
 @dataclass(frozen=True)
 class QueryPlan:
-    """Validated router output; explicit API filters remain authoritative."""
+    """Проверенный результат роутера; явные фильтры API остаются главными."""
 
     intent: Literal["factoid", "structural", "temporal", "multi_hop"] = "factoid"
     years: list[int] = field(default_factory=list)
@@ -34,7 +34,7 @@ class QueryPlan:
 
 @dataclass(frozen=True)
 class AgentAction:
-    """One allowlisted tool invocation proposed by the action selector."""
+    """Один вызов инструмента из белого списка, предложенный селектором действий."""
 
     tool_name: str
     arguments: dict[str, Any]
@@ -55,7 +55,7 @@ class Citation:
 
 @dataclass(frozen=True)
 class Answer:
-    """Answer contract from spec_target.md, validated against the run manifest."""
+    """Контракт ответа из spec_target.md, проверенный по манифесту запуска."""
 
     status: AnswerStatus
     answer: str
@@ -76,7 +76,7 @@ class ToolEvent:
 
 @dataclass(frozen=True)
 class AgentEvent:
-    """UI-safe streaming event; ``result`` is populated on run_completed."""
+    """Безопасное для UI потоковое событие; ``result`` заполняется на run_completed."""
 
     event_type: str
     request_id: str
@@ -97,7 +97,7 @@ class AgentRunResult:
 
 
 class AgentState(TypedDict, total=False):
-    """StateGraph channels for a single isolated user turn."""
+    """Каналы StateGraph для одного изолированного пользовательского хода."""
 
     request_id: str
     conversation_id: str

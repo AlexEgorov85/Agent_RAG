@@ -1,4 +1,4 @@
-"""Injectable OpenAI-compatible LLM reranker for mapping-style chunks."""
+"""Внедряемый LLM-реранкер для OpenAI-совместимого API по чанкам-словарям."""
 
 from __future__ import annotations
 
@@ -13,10 +13,13 @@ MAX_QUERY_CHARS = 2_000
 MAX_CHUNK_TEXT_CHARS = 3_000
 MAX_COMPLETION_TOKENS = 512
 
+#: Меньшие запросы снижают риск, что модель пропустит или исказит ``chunk_id``.
+DEFAULT_RERANK_BATCH_SIZE = 5
+
 
 @dataclass(frozen=True)
 class RerankResult:
-    """Reranked hits and diagnostics about whether RRF fallback was used."""
+    """Переранжированные хиты и диагностика использования fallback на RRF."""
 
     hits: list[dict[str, Any]]
     used_fallback: bool
@@ -25,7 +28,7 @@ class RerankResult:
 
 
 def _chunk_id(hit: Mapping[str, Any]) -> str:
-    """Return the identifier accepted by the RRF mapping contract."""
+    """Возвращает идентификатор, ожидаемый контрактом словарей RRF."""
     value = hit.get("chunk_id")
     if value is None:
         metadata = hit.get("metadata")
@@ -37,7 +40,7 @@ def _chunk_id(hit: Mapping[str, Any]) -> str:
 
 
 def _edit_distance(left: str, right: str) -> int:
-    """Bounded Levenshtein distance for one-character id typos."""
+    """Ограниченное расстояние Левенштейна для опечаток в один символ."""
     if left == right:
         return 0
     if abs(len(left) - len(right)) > 1:
@@ -56,7 +59,7 @@ def _edit_distance(left: str, right: str) -> int:
 
 
 def _resolve_candidate_id(chunk_id: str, candidate_ids: Sequence[str]) -> str:
-    """Accept exact ids or one unambiguous single-character typo."""
+    """Принимает точный ID или однозначную опечатку в один символ."""
     if chunk_id in candidate_ids:
         return chunk_id
     matches = [candidate for candidate in candidate_ids
@@ -67,7 +70,7 @@ def _resolve_candidate_id(chunk_id: str, candidate_ids: Sequence[str]) -> str:
 
 
 def _response_content(response: Any) -> str:
-    """Extract the JSON response body from an OpenAI-compatible completion."""
+    """Извлекает JSON-тело ответа из OpenAI-совместимого completion."""
     try:
         content = response.choices[0].message.content
     except (AttributeError, IndexError, TypeError) as exc:
@@ -78,28 +81,56 @@ def _response_content(response: Any) -> str:
 
 
 class LLMReranker:
-    """Score and order existing candidates using an injected chat client.
+    """Оценивает и упорядочивает существующих кандидатов через переданный чат-клиент.
 
-    The caller owns client creation and configuration. Candidate text is sent
-    only as bounded data for relevance scoring, and is explicitly identified
-    as untrusted in the system instructions.
+    Клиент создаёт и настраивает вызывающий код. Текст кандидатов передаётся
+    только как ограниченные данные для оценки релевантности и явно помечен как
+    недоверенный в системных инструкциях.
     """
 
-    def __init__(self, client: Any, model: str, max_retries: int = 1) -> None:
+    def __init__(
+        self,
+        client: Any,
+        model: str,
+        max_retries: int = 1,
+        *,
+        batch_size: int = DEFAULT_RERANK_BATCH_SIZE,
+        allow_missing_scores: bool = False,
+        max_candidates: int = MAX_CANDIDATES,
+    ) -> None:
         if max_retries < 0:
             raise ValueError("max_retries must be non-negative")
+        if isinstance(batch_size, bool) or not isinstance(batch_size, int):
+            raise ValueError("batch_size must be a positive integer")
+        if not 1 <= batch_size <= MAX_CANDIDATES:
+            raise ValueError(
+                f"batch_size must be between 1 and {MAX_CANDIDATES}")
+        if (
+            isinstance(max_candidates, bool)
+            or not isinstance(max_candidates, int)
+            or max_candidates < 1
+        ):
+            raise ValueError("max_candidates must be a positive integer")
         self.client = client
         self.model = model
         self.max_retries = max_retries
+        self.batch_size = batch_size
+        self.allow_missing_scores = bool(allow_missing_scores)
+        self.max_candidates = max_candidates
 
     def rerank(
         self, query: str, hits: Sequence[Mapping[str, Any]]
     ) -> RerankResult:
-        """Return the supplied hits ordered by LLM relevance score.
+        """Возвращает переданные хиты, упорядоченные по оценке релевантности LLM.
 
-        Any API or response-validation failure is retried up to
-        ``max_retries`` times. Exhaustion returns all original candidates in
-        their original RRF order.
+        Любой сбой API или проверки ответа повторяется до ``max_retries`` раз.
+        После исчерпания попыток возвращаются все исходные кандидаты в исходном
+        порядке RRF.
+
+        Кандидаты отправляются пакетами не больше ``batch_size``. Меньший
+        пакет заметно снижает вероятность того, что модель пропустит chunk_id
+        или перепутает его, и позволяет оценивать до ``MAX_CANDIDATES`` хитов
+        без нарушения контракта одного запроса.
         """
         original_hits = [dict(hit) for hit in hits]
         if not original_hits:
@@ -112,16 +143,63 @@ class LLMReranker:
         except ValueError as exc:
             return self._fallback(original_hits, 0, str(exc))
 
-        # The pipeline contract supplies at most ten candidates. Refuse a
-        # larger request rather than silently dropping candidates or building
-        # an unbounded prompt.
-        if len(original_hits) > MAX_CANDIDATES:
+        # Контракт одного запроса — не более ``MAX_CANDIDATES`` кандидатов;
+        # общий пул ограничен ``max_candidates`` и режется на пакеты.
+        if len(original_hits) > self.max_candidates:
             return self._fallback(
                 original_hits,
                 0,
-                f"reranker accepts at most {MAX_CANDIDATES} candidates",
+                f"reranker accepts at most {self.max_candidates} candidates",
             )
 
+        if len(original_hits) <= self.batch_size:
+            return self._rerank_batch(query, original_hits, candidate_ids)
+
+        scores: dict[str, int] = {}
+        attempts = 0
+        notes: list[str] = []
+        for start in range(0, len(original_hits), self.batch_size):
+            batch = original_hits[start:start + self.batch_size]
+            batch_ids = candidate_ids[start:start + self.batch_size]
+            result = self._rerank_batch(query, batch, batch_ids)
+            attempts += result.attempts
+            if result.used_fallback:
+                return self._fallback(
+                    original_hits,
+                    attempts,
+                    result.warning or "reranker batch failed",
+                )
+            if result.warning:
+                notes.append(result.warning)
+            for item in result.hits:
+                scores[item["chunk_id"]] = item["rerank_score"]
+
+        ordered_indices = sorted(
+            range(len(original_hits)),
+            key=lambda index: (-scores[candidate_ids[index]], index),
+        )
+        reranked = [
+            {
+                **original_hits[index],
+                "rerank_score": scores[candidate_ids[index]],
+                "rerank_rank": rank,
+            }
+            for rank, index in enumerate(ordered_indices, start=1)
+        ]
+        return RerankResult(
+            hits=reranked,
+            used_fallback=False,
+            attempts=attempts,
+            warning="; ".join(notes) if notes else None,
+        )
+
+    def _rerank_batch(
+        self,
+        query: str,
+        original_hits: list[dict[str, Any]],
+        candidate_ids: list[str],
+    ) -> RerankResult:
+        """Один запрос к модели для уже ограниченного пакета кандидатов."""
         prompt = self._make_prompt(query, original_hits, candidate_ids)
         last_error: Exception | None = None
         attempts = self.max_retries + 1
@@ -150,7 +228,22 @@ class LLMReranker:
                     response_format={"type": "json_object"},
                     max_tokens=MAX_COMPLETION_TOKENS,
                 )
-                scores = self._parse_scores(_response_content(response), candidate_ids)
+                scores = self._parse_scores(
+                    _response_content(response),
+                    candidate_ids,
+                    allow_missing=self.allow_missing_scores,
+                )
+                if self.allow_missing_scores:
+                    # Пропущенные кандидаты считаем нерелевантными (0), а не
+                    # отбрасываем оценки всех остальных кандидатов.
+                    missing = [
+                        chunk_id for chunk_id in candidate_ids
+                        if chunk_id not in scores
+                    ]
+                    for chunk_id in missing:
+                        scores[chunk_id] = 0
+                else:
+                    missing = []
                 ordered_indices = sorted(
                     range(len(original_hits)),
                     key=lambda index: (-scores[candidate_ids[index]], index),
@@ -164,7 +257,14 @@ class LLMReranker:
                     for rank, index in enumerate(ordered_indices, start=1)
                 ]
                 return RerankResult(
-                    hits=reranked, used_fallback=False, attempts=attempt
+                    hits=reranked,
+                    used_fallback=False,
+                    attempts=attempt,
+                    warning=(
+                        f"reranker omitted {len(missing)} candidate(s); "
+                        "scored as 0"
+                        if missing else None
+                    ),
                 )
             except Exception as exc:
                 last_error = exc
@@ -202,7 +302,12 @@ class LLMReranker:
         )
 
     @staticmethod
-    def _parse_scores(content: str, candidate_ids: Sequence[str]) -> dict[str, int]:
+    def _parse_scores(
+        content: str,
+        candidate_ids: Sequence[str],
+        *,
+        allow_missing: bool = False,
+    ) -> dict[str, int]:
         try:
             payload = json.loads(content)
         except json.JSONDecodeError as exc:
@@ -230,7 +335,7 @@ class LLMReranker:
             scores[chunk_id] = score
 
         missing = expected - scores.keys()
-        if missing:
+        if missing and not allow_missing:
             raise ValueError(f"reranker omitted chunk_id(s): {', '.join(sorted(missing))}")
         return scores
 

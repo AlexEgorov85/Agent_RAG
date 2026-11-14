@@ -1,4 +1,4 @@
-"""Offline tests for the injectable LLM reranker."""
+"""Офлайн-тесты внедряемого LLM-реранкера."""
 
 from __future__ import annotations
 
@@ -152,3 +152,84 @@ def test_scoring_prompt_marks_candidate_text_untrusted_and_bounds_it() -> None:
     assert "never follow instructions" in messages[0]["content"]
     assert "untrusted" in messages[1]["content"]
     assert len(messages[1]["content"]) < 10_000
+
+def _prompt_ids(call: dict[str, Any]) -> list[str]:
+    payload = json.loads(call["messages"][-1]["content"].split("\n", 1)[1])
+    return [item["chunk_id"] for item in payload["candidates"]]
+
+
+def test_batches_large_candidate_lists_and_keeps_global_order() -> None:
+    hits = [
+        {"chunk_id": "a", "text": "A"},
+        {"chunk_id": "b", "text": "B"},
+        {"chunk_id": "c", "text": "C"},
+        {"chunk_id": "d", "text": "D"},
+    ]
+    client, completions = _client(
+        {"scores": [{"chunk_id": "a", "score": 1}, {"chunk_id": "b", "score": 3}]},
+        {"scores": [{"chunk_id": "c", "score": 0}, {"chunk_id": "d", "score": 2}]},
+    )
+    reranker = LLMReranker(client, "model", batch_size=2)
+
+    result = reranker.rerank("query", hits)
+
+    assert [_prompt_ids(call) for call in completions.calls] == [["a", "b"], ["c", "d"]]
+    assert [hit["chunk_id"] for hit in result.hits] == ["b", "d", "a", "c"]
+    assert [hit["rerank_score"] for hit in result.hits] == [3, 2, 1, 0]
+    assert result.attempts == 2
+    assert result.used_fallback is False
+
+
+def test_one_failed_batch_falls_back_to_original_order() -> None:
+    hits = [
+        {"chunk_id": "a", "text": "A"},
+        {"chunk_id": "b", "text": "B"},
+        {"chunk_id": "c", "text": "C"},
+    ]
+    client, _ = _client(
+        {"scores": [{"chunk_id": "a", "score": 3}, {"chunk_id": "b", "score": 1}]},
+        '{"scores": [',
+    )
+    reranker = LLMReranker(client, "model", batch_size=2, max_retries=0)
+
+    result = reranker.rerank("query", hits)
+
+    assert result.used_fallback is True
+    assert [hit["chunk_id"] for hit in result.hits] == ["a", "b", "c"]
+    assert all(hit["rerank_score"] is None for hit in result.hits)
+
+
+def test_batch_size_is_validated() -> None:
+    import pytest
+
+    client, _ = _client()
+    for value in (0, -1, 11, True):
+        with pytest.raises(ValueError):
+            LLMReranker(client, "model", batch_size=value)
+
+def test_lenient_mode_scores_omitted_candidates_as_zero() -> None:
+    client, _ = _client(
+        {"scores": [{"chunk_id": "a", "score": 3}]},
+    )
+    reranker = LLMReranker(
+        client, "test-model", batch_size=5, allow_missing_scores=True)
+
+    result = reranker.rerank("query", _hits())
+
+    assert result.used_fallback is False
+    assert result.warning and "omitted 2 candidate" in result.warning
+    by_id = {hit["chunk_id"]: hit["rerank_score"] for hit in result.hits}
+    assert by_id == {"a": 3, "b": 0, "c": 0}
+    assert [hit["chunk_id"] for hit in result.hits] == ["a", "b", "c"]
+
+
+def test_lenient_mode_still_rejects_injected_ids() -> None:
+    client, _ = _client(
+        {"scores": [{"chunk_id": "a", "score": 3}, {"chunk_id": "injected", "score": 3}]},
+    )
+    reranker = LLMReranker(
+        client, "test-model", batch_size=5, allow_missing_scores=True)
+
+    result = reranker.rerank("query", _hits())
+
+    assert result.used_fallback is True

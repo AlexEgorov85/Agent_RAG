@@ -1,4 +1,4 @@
-"""Focused deterministic tests for corpus validation."""
+"""Точечные детерминированные тесты валидации корпуса."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from src.ingestion.corpus_validator import validate_corpus
 
 @pytest.fixture
 def valid_chunk() -> dict[str, object]:
-    """A minimal chunk matching the ingestion contract."""
+    """Минимальный чанк, соответствующий контракту ingestion-слоя."""
     return {
         "chunk_id": "sber_2023:00001:c0:abc123",
         "evidence_id": "sber_2023:p001",
@@ -32,7 +32,7 @@ def valid_chunk() -> dict[str, object]:
 
 @pytest.fixture
 def page_counts() -> dict[str, int]:
-    """Explicit PDF page counts for the fixture document."""
+    """Явное число страниц PDF для документа-фикстуры."""
     return {"sber_2023": 3}
 
 

@@ -1,18 +1,26 @@
-"""Whole-chunk context packing with an explicit included/skipped manifest.
+"""Упаковка контекста целыми чанками с явным манифестом включённых и пропущенных.
 
-The packer never trims a chunk: a chunk is either rendered completely or
-omitted. This protects table rows from losing the year/unit that makes a
-citation verifiable, and keeps every chunk ID in the prompt resolvable.
+Пакер никогда не обрезает чанк: он либо рендерится полностью, либо опускается.
+Так строки таблиц не теряют год/единицу измерения, без которых цитату нельзя
+проверить, а все ``chunk_id`` в промпте остаются разрешимыми.
 """
 
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-#: Fields that must be visible to the generator for every packed chunk.
+#: Консервативный запас, когда токенизатор недоступен: русский текст обычно
+#: даёт 2.5–3.5 символа на токен для словарей типа cl100k.
+CHARS_PER_TOKEN = 3
+
+_ENCODER: Any = None
+_ENCODER_FAILED = False
+
+#: Поля, которые генератор должен видеть для каждого упакованного чанка.
 CONTEXT_FIELDS: tuple[str, ...] = (
     "chunk_id",
     "doc_id",
@@ -29,12 +37,12 @@ CONTEXT_FIELDS: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class ContextManifest:
-    """Audit record of one packing call.
+    """Запись аудита одного вызова упаковки.
 
-    ``included`` and ``skipped`` keep encounter order. ``duplicates`` lists
-    repeated chunk IDs that were already seen and therefore packed once.
-    ``used_chars`` is exactly ``len(PackedContext.text)`` and never exceeds
-    ``max_chars``.
+    ``included`` и ``skipped`` сохраняют порядок встречи. ``duplicates`` — это
+    повторно встреченные ID, которые уже были упакованы. ``used_chars`` равен
+    ``len(PackedContext.text)`` и не превышает ``max_chars``; ``used_tokens`` и
+    ``max_tokens`` отражают дополнительный токенный бюджет, если он задан.
     """
 
     included: list[str] = field(default_factory=list)
@@ -42,21 +50,23 @@ class ContextManifest:
     duplicates: list[str] = field(default_factory=list)
     used_chars: int = 0
     max_chars: int = 0
+    used_tokens: int = 0
+    max_tokens: int | None = None
 
     @property
     def included_chunk_ids(self) -> list[str]:
-        """Alias with an explicit unit for callers that avoid abbreviations."""
+        """Псевдоним с явным названием для кода, избегающего сокращений."""
         return list(self.included)
 
     @property
     def skipped_chunk_ids(self) -> list[str]:
-        """Alias matching :attr:`included_chunk_ids`."""
+        """Псевдоним, соответствующий :attr:`included_chunk_ids`."""
         return list(self.skipped)
 
 
 @dataclass(frozen=True)
 class PackedContext:
-    """Rendered context text plus structured records and its manifest."""
+    """Отрисованный текст контекста, структурные записи и манифест."""
 
     records: list[dict[str, Any]] = field(default_factory=list)
     text: str = ""
@@ -68,7 +78,7 @@ class PackedContext:
 
     @property
     def evidence(self) -> dict[str, dict[str, Any]]:
-        """Evidence mapping keyed by chunk ID, suitable for an answerer."""
+        """Словарь свидетельств по ``chunk_id``, пригодный для генератора ответа."""
         return {record["chunk_id"]: record for record in self.records}
 
 
@@ -92,7 +102,7 @@ def _optional_int(value: Any) -> int | None:
 
 
 def _hit_parts(hit: Any) -> tuple[Any, Mapping[str, Any] | None]:
-    """Return the hit-level chunk ID and the mapping holding chunk fields."""
+    """Возвращает ID чанка с уровня хита и словарь с полями чанка."""
     if isinstance(hit, Mapping):
         chunk_id = hit.get("chunk_id")
         inner = hit.get("chunk")
@@ -103,7 +113,7 @@ def _hit_parts(hit: Any) -> tuple[Any, Mapping[str, Any] | None]:
     inner = getattr(hit, "chunk", None)
     if isinstance(inner, Mapping):
         return chunk_id, inner
-    # Tolerate plain objects exposing the chunk contract as attributes.
+    # Поддерживаем и простые объекты, отдающие поля чанка как атрибуты.
     attributes = {
         name: getattr(hit, name) for name in CONTEXT_FIELDS if hasattr(hit, name)
     }
@@ -147,22 +157,62 @@ def _render(record: Mapping[str, Any]) -> str:
     return json.dumps(record, ensure_ascii=False, indent=2)
 
 
-def pack_context(
-    hits: Iterable[Any], max_chars: int = 16_000
-) -> PackedContext:
-    """Pack whole chunks into at most ``max_chars`` rendered characters.
+def count_tokens(text: str) -> int:
+    """Приблизительно считает число токенов в ``text``.
 
-    ``hits`` may contain :class:`~src.retrieval.hybrid_retriever.RetrievalHit`
-    objects, mapping hits with a nested ``chunk``, or flat chunk mappings.
-    Chunks are deduplicated by ``chunk_id``. A chunk whose rendered form does
-    not fit the remaining budget is skipped and recorded in the manifest; the
-    loop still considers later, smaller chunks. Table ``html`` stays in the
-    same record as its source ``text``.
+    Использует кэшированный энкодер ``tiktoken`` cl100k, если он доступен,
+    иначе — консервативную эвристику по символам. Точный токенизатор целевой
+    модели может немного отличаться, поэтому вызывающий код сохраняет лимит по
+    символам как страховку; для планирования бюджета оценки достаточно, и она
+    детерминированно выделяет один и тот же бюджет.
+    """
+    global _ENCODER, _ENCODER_FAILED
+    if not text:
+        return 0
+    if _ENCODER is None and not _ENCODER_FAILED:
+        try:
+            import tiktoken
+
+            _ENCODER = tiktoken.get_encoding("cl100k_base")
+        except Exception:  # noqa: BLE001 — необязательная зависимость
+            _ENCODER_FAILED = True
+    if _ENCODER is not None:
+        return len(_ENCODER.encode(text))
+    return max(1, math.ceil(len(text) / CHARS_PER_TOKEN))
+
+
+def pack_context(
+    hits: Iterable[Any],
+    max_chars: int = 16_000,
+    *,
+    max_tokens: int | None = None,
+    token_counter: Any = None,
+) -> PackedContext:
+    """Упаковывает целые чанки в текст длиной не более ``max_chars``.
+
+    ``max_tokens`` задаёт дополнительный бюджет в токенах (например,
+    ``context_window - max_output - prompt_reserve``). Чанк включается, только
+    если он целиком помещается и в символьный, и в токенный бюджет, поэтому
+    число чанков вычисляется по фактическому размеру, а не фиксируется
+    заранее. ``token_counter`` позволяет подставить точный токенизатор модели.
+
+    ``hits`` может содержать объекты
+    :class:`~src.retrieval.hybrid_retriever.RetrievalHit`, словари-хиты с
+    вложенным ``chunk`` или плоские словари чанков. Чанки дедуплицируются по
+    ``chunk_id``. Чанк, который не влезает в остаток бюджета, пропускается и
+    попадает в манифест, но цикл продолжает проверять более мелкие чанки.
+    Табличный ``html`` остаётся в той же записи, что и исходный ``text``.
     """
     if isinstance(max_chars, bool) or not isinstance(max_chars, int):
         raise ValueError("max_chars must be a non-negative integer")
     if max_chars < 0:
         raise ValueError("max_chars must be a non-negative integer")
+    if max_tokens is not None:
+        if isinstance(max_tokens, bool) or not isinstance(max_tokens, int):
+            raise ValueError("max_tokens must be a non-negative integer or None")
+        if max_tokens < 0:
+            raise ValueError("max_tokens must be a non-negative integer or None")
+    counter = token_counter or count_tokens
 
     records: list[dict[str, Any]] = []
     included: list[str] = []
@@ -187,16 +237,22 @@ def pack_context(
         if len(candidate) > max_chars:
             skipped.append(chunk_id)
             continue
+        if max_tokens is not None and counter(candidate) > max_tokens:
+            skipped.append(chunk_id)
+            continue
         text = candidate
         records.append(record)
         included.append(chunk_id)
 
     used_chars = len(text)
+    used_tokens = counter(text) if max_tokens is not None else 0
     manifest = ContextManifest(
         included=included,
         skipped=skipped,
         duplicates=duplicates,
         used_chars=used_chars,
         max_chars=max_chars,
+        used_tokens=used_tokens,
+        max_tokens=max_tokens,
     )
     return PackedContext(records=records, text=text, manifest=manifest)

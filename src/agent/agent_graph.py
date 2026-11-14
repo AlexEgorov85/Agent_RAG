@@ -1,4 +1,4 @@
-"""Bounded LangGraph orchestration graph."""
+"""Ограниченный граф оркестрации на LangGraph."""
 
 from __future__ import annotations
 
@@ -92,7 +92,7 @@ def _as_plan(value: Any) -> QueryPlan:
 
 
 def _filters_with_plan(explicit: SearchFilters, plan: QueryPlan) -> SearchFilters:
-    """Narrow unspecified filters from the router without overriding user scope."""
+    """Сужает незаданные пользователем фильтры по плану роутера, не меняя его выбор."""
     user_years_are_explicit = explicit.years is not None
     years = None if explicit.years is None else set(explicit.years)
     year_from = explicit.year_from
@@ -113,8 +113,8 @@ def _filters_with_plan(explicit: SearchFilters, plan: QueryPlan) -> SearchFilter
                 if year_to is None
                 else min(year_to, plan.year_to)
             )
-        # A router inference conflicting with a user-supplied bound narrows to
-        # an empty scope rather than weakening or reversing the user's bound.
+        # Если вывод роутера конфликтует с границей пользователя, сужаем
+        # диапазон до пустого, а не ослабляем или переворачиваем его.
         if year_from is not None and year_to is not None and year_from > year_to:
             years = set()
             year_from, year_to = explicit.year_from, explicit.year_to
@@ -138,7 +138,7 @@ def _filters_with_plan(explicit: SearchFilters, plan: QueryPlan) -> SearchFilter
 
 
 def _graph_evidence_ids(value: Any) -> set[str]:
-    """Collect IDs only from explicit graph-result evidence fields."""
+    """Собирает ID только из явных полей evidence в результате графа."""
     found: set[str] = set()
 
     def visit(item: Any) -> None:
@@ -218,7 +218,7 @@ def build_agent_graph(
     answer_generator: Callable[[AgentState], tuple[Answer, list[str]]] | None = None,
     answer_validator: Callable[[Answer, set[str]], bool] | None = None,
 ):
-    """Build a StateGraph that enforces tool-call and search-call budgets."""
+    """Строит StateGraph с лимитами на вызовы инструментов и поиска."""
     router = router or _DefaultRouter()
     action_selector = action_selector or _DefaultSelector()
 
@@ -289,7 +289,7 @@ def build_agent_graph(
                 "_duration_ms": (time.perf_counter() - started) * 1000,
             })
         except Exception:
-            # Never put exception details or provider response bodies into messages.
+            # Никогда не помещаем текст исключений или тела ответов провайдера в сообщения.
             return encode_result({
                 "_agent_status": "failed",
                 "warning": "tool_failed",
@@ -301,7 +301,7 @@ def build_agent_graph(
         query: str, filters: dict[str, Any] | None = None,
         retrieval_mode: str = "hybrid", top_k: int = 5,
     ) -> str:
-        """Search the report corpus with validated filters."""
+        """Ищет по корпусу отчётов с проверенными фильтрами."""
         return wrapped(
             "search_reports",
             {
@@ -314,7 +314,7 @@ def build_agent_graph(
     def get_structure_tree(
         doc_id: str, section_path: str | None = None, max_depth: int = 4,
     ) -> str:
-        """Read a bounded local document structure tree."""
+        """Читает ограниченное дерево разделов локального документа."""
         return wrapped(
             "get_structure_tree",
             {"doc_id": doc_id, "section_path": section_path, "max_depth": max_depth},
@@ -325,7 +325,7 @@ def build_agent_graph(
         entity_names: list[str], filters: dict[str, Any] | None = None,
         max_hops: int = 2,
     ) -> str:
-        """Find bounded entity paths with source evidence."""
+        """Ищет ограниченные пути сущностей вместе с исходными свидетельствами."""
         return wrapped(
             "get_entities",
             {
@@ -336,7 +336,7 @@ def build_agent_graph(
 
     @tool("get_chunk", args_schema=ChunkInput)
     def get_chunk(chunk_id: str) -> str:
-        """Read one chunk by its indexed chunk ID."""
+        """Читает один чанк по его проиндексированному ``chunk_id``."""
         return wrapped("get_chunk", {"chunk_id": chunk_id})
 
     tool_node = ToolNode([search_reports, get_structure_tree, get_entities, get_chunk])
@@ -364,7 +364,7 @@ def build_agent_graph(
             result = target(state["question"], state["filters"], **kwargs)
             plan = _as_plan(result)
         except Exception:
-            # Never expose provider exception messages or bodies.
+            # Никогда не раскрываем текст исключений и тела ответов провайдера.
             plan = QueryPlan()
             emit(
                 "analysis_completed",
@@ -411,9 +411,9 @@ def build_agent_graph(
             action = AgentAction(action.tool_name, action.arguments, "fact_lookup")
         if action.tool_name not in tools.ALLOWLIST:
             warnings = state.get("warnings", []) + ["unknown_tool_rejected"]
-            # A malformed router/selector cannot execute arbitrary functionality.
+            # Сломанный роутер/селектор не может запустить произвольный код.
             if not state.get("unknown_action_fallback_used"):
-                # Continue with the safe search through the standard ToolNode.
+                # Продолжаем безопасным поиском через штатный ToolNode.
                 action = AgentAction(
                     "search_reports",
                     {
@@ -493,8 +493,8 @@ def build_agent_graph(
                 "action": None, "warnings": warnings,
                 "messages": [AIMessage(content="")],
             }
-        # LangGraph's documented ToolNode/tools_condition protocol carries the
-        # validated decision; no custom tool-call execution loop is implemented.
+        # Штатный протокол LangGraph ToolNode/tools_condition выполняет
+        # проверенное решение; собственный цикл вызова инструментов не нужен.
         return build_call(AgentAction(action.tool_name, arguments, action.reason_code))
 
     def build_call(
@@ -646,8 +646,8 @@ def build_agent_graph(
         }
 
     def assess_evidence(state: AgentState) -> dict[str, Any]:
-        # The selector is deliberately consulted again after every result; it
-        # may choose a bounded follow-up (e.g. structure -> search).
+        # Селектор намеренно опрашивается заново после каждого результата:
+        # он может выбрать ограниченное продолжение (например, структура → поиск).
         enough = bool(state.get("evidence_manifest"))
         return {"status": "evidence_available" if enough else "evidence_pending"}
 
@@ -681,7 +681,7 @@ def build_agent_graph(
             try:
                 answer, answer_warnings = answer_generator(state)
             except Exception:
-                # Keep generator/provider errors out of state and UI.
+                # Ошибки генератора/провайдера не попадают в состояние и UI.
                 answer = Answer(
                     "abstain",
                     "Ответ не удалось безопасно сформировать.",

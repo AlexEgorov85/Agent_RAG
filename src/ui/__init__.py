@@ -1,6 +1,6 @@
-"""Streamlit UI package for the report agent.
+"""Пакет Streamlit-UI для агента отчётов.
 
-Importing this package does not require Streamlit to be installed.
+Импорт пакета не требует установленного Streamlit.
 """
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from typing import Any
 
 
 def main(*args: Any, **kwargs: Any) -> None:
-    """Load and run the UI lazily."""
+    """Лениво загружает и запускает UI."""
     from .app import main as run_app
 
     run_app(*args, **kwargs)

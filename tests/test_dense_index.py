@@ -1,4 +1,4 @@
-"""Offline tests for the dense cosine index."""
+"""Офлайн-тесты плотного косинусного индекса."""
 
 from __future__ import annotations
 

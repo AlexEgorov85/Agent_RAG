@@ -1,8 +1,8 @@
-"""Typed data contracts for the in-memory Graph RAG slice.
+"""Типизированные контракты данных для in-memory среза Graph RAG.
 
-The graph uses string IDs and JSON-compatible attributes so it can be safely
-serialized without pickle.  The ingestion layer remains the source of truth for
-chunks and section structures.
+Граф использует строковые ID и JSON-совместимые атрибуты, поэтому безопасно
+сериализуется без pickle. Источником истины для чанков и структур разделов
+остаётся ingestion-слой.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ ENTITY_TYPES = frozenset({
 
 @dataclass(frozen=True)
 class DocumentNode:
-    """Document metadata node, keyed as ``doc:{doc_id}``."""
+    """Узел метаданных документа с ключом ``doc:{doc_id}``."""
 
     doc_id: str
     year: int | None = None
@@ -38,7 +38,7 @@ class DocumentNode:
 
 @dataclass(frozen=True)
 class SectionGraphNode:
-    """Graph representation of an ingestion ``SectionNode``."""
+    """Графовое представление ``SectionNode`` из ingestion-слоя."""
 
     doc_id: str
     stable_section_id: str
@@ -55,7 +55,7 @@ class SectionGraphNode:
 
 @dataclass(frozen=True)
 class ChunkNode:
-    """Retrieval-facing chunk node."""
+    """Узел чанка, используемый при поиске."""
 
     chunk_id: str
     doc_id: str
@@ -74,10 +74,10 @@ class ChunkNode:
 
 @dataclass(frozen=True)
 class EntityRecord:
-    """Pre-extracted entity mention with chunk-level provenance.
+    """Заранее извлечённое упоминание сущности с происхождением на уровне чанка.
 
-    ``chunk_id`` is required: entity extraction is intentionally external to
-    this module and this record never triggers an LLM call.
+    ``chunk_id`` обязателен: извлечение сущностей намеренно вынесено из этого
+    модуля, и запись никогда не запускает вызов LLM.
     """
 
     name: str
@@ -91,7 +91,7 @@ class EntityRecord:
 
 @dataclass(frozen=True)
 class RelationRecord:
-    """Pre-extracted entity relation, backed by one or more evidence chunks."""
+    """Заранее извлечённая связь сущностей, подкреплённая чанками-доказательствами."""
 
     subject: str
     object: str
@@ -106,10 +106,10 @@ class RelationRecord:
 
 @dataclass(frozen=True)
 class GraphBuildConfig:
-    """Deterministic graph build options.
+    """Опции детерминированной сборки графа.
 
-    ``extractor_name`` and version fields are descriptive only.  Entity and
-    relation extraction itself is supplied as records by the caller.
+    Поля ``extractor_name`` и версий — только описательные. Сами сущности и
+    связи передаются вызывающим кодом готовыми записями.
     """
 
     extractor_name: str | None = None
@@ -120,20 +120,20 @@ class GraphBuildConfig:
 
 @dataclass
 class GraphBuildResult:
-    """Built graph, deterministic fingerprint, and compact manifest."""
+    """Собранный граф, детерминированный отпечаток и компактный манифест."""
 
     graph: nx.MultiDiGraph
     graph_fingerprint: str
     manifest: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        """Return a stable JSON-compatible graph artifact."""
+        """Возвращает стабильный JSON-совместимый артефакт графа."""
         return serialize_graph(self.graph, self.graph_fingerprint, self.manifest)
 
 
 @dataclass(frozen=True)
 class GraphRetrievalResult:
-    """A filtered chunk candidate and the graph path explaining its retrieval."""
+    """Отфильтрованный чанк-кандидат и графовый путь, объясняющий его находку."""
 
     chunk_id: str
     graph_score: float
@@ -144,7 +144,7 @@ class GraphRetrievalResult:
 
 @dataclass
 class GraphView:
-    """Size-limited JSON-compatible subgraph payload for visualization."""
+    """Ограниченный по размеру JSON-совместимый подграф для визуализации."""
 
     nodes: list[dict[str, Any]]
     edges: list[dict[str, Any]]
@@ -154,14 +154,14 @@ class GraphView:
 
 
 def entity_node_id(name: str, entity_type: str = "Other") -> str:
-    """Create a deterministic entity ID using type and normalized name."""
+    """Создаёт детерминированный ID сущности из типа и нормализованного имени."""
     canonical_type = entity_type if entity_type in ENTITY_TYPES else "Other"
     normalized_name = " ".join(name.split()).casefold()
     return f"entity:{canonical_type}:{normalized_name}"
 
 
 def _json_value(value: Any) -> Any:
-    """Convert common non-JSON collection values into stable JSON values."""
+    """Преобразует нестандартные коллекции в стабильные JSON-значения."""
     if isinstance(value, Mapping):
         return {str(k): _json_value(v) for k, v in sorted(value.items(), key=lambda x: str(x[0]))}
     if isinstance(value, (list, tuple, set, frozenset)):
@@ -177,7 +177,7 @@ def serialize_graph(
     graph_fingerprint: str | None = None,
     manifest: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Serialize a MultiDiGraph deterministically using ordinary JSON values."""
+    """Детерминированно сериализует MultiDiGraph обычными JSON-значениями."""
     nodes = [
         {"node_id": str(node_id), **_json_value(attrs)}
         for node_id, attrs in graph.nodes(data=True)

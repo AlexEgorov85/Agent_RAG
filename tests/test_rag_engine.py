@@ -1,4 +1,4 @@
-"""Offline tests for RAGEngine orchestration with fake retriever/generator."""
+"""Офлайн-тесты оркестрации RAGEngine с заглушками retriever/generator."""
 
 from __future__ import annotations
 

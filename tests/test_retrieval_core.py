@@ -1,4 +1,4 @@
-"""Offline, deterministic unit tests for BM25 and RRF core behavior."""
+"""Офлайн-юнит-тесты базового поведения BM25 и RRF."""
 
 from __future__ import annotations
 

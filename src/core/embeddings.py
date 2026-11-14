@@ -1,8 +1,8 @@
-"""Course embeddings adapter for OpenAI-compatible Cloud.ru endpoints.
+"""Адаптер эмбеддингов курса для OpenAI-совместимого API Cloud.ru.
 
-Only queries receive the retrieval prefix; document chunks are embedded as-is.
-The adapter reorders indexed responses and rejects malformed vectors so a bad
-provider response cannot poison the cache.
+Префикс поиска получает только запрос, документы встраиваются как есть.
+Адаптер переупорядочивает ответ по индексам и отбраковывает битые векторы,
+чтобы плохой ответ провайдера не испортил кэш.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ def _item_field(item: Any, key: str, default: Any = None) -> Any:
 
 
 class CourseEmbeddings:
-    """Embed documents unchanged and prefix queries for retrieval models."""
+    """Встраивает документы без префикса, а запросы — с префиксом поиска."""
 
     def __init__(self, client: Any, model: str, query_prefix: str = "query:") -> None:
         if client is None:
@@ -75,11 +75,11 @@ class CourseEmbeddings:
         return [vector for _, vector in ordered]
 
     def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
-        """Return document vectors without a retrieval prefix."""
+        """Возвращает векторы документов без префикса поиска."""
         return self._embed(list(texts))
 
     def embed_query(self, text: str) -> list[float]:
-        """Return one query vector with the configured retrieval prefix."""
+        """Возвращает один вектор запроса с настроенным префиксом поиска."""
         if not isinstance(text, str):
             raise TypeError("query must be a string")
         vectors = self._embed([self.query_prefix + text])
@@ -87,7 +87,7 @@ class CourseEmbeddings:
 
 
 def normalize(vector: Sequence[float]) -> list[float]:
-    """Normalize a vector to unit length; zero vectors stay zero."""
+    """Приводит вектор к единичной длине; нулевой вектор остаётся нулевым."""
     values = [float(value) for value in vector]
     if not values or not all(math.isfinite(value) for value in values):
         raise ValueError("vector must contain finite numbers")

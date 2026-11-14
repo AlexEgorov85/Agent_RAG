@@ -1,9 +1,9 @@
-"""OpenAI-compatible answer generator with strict citation validation.
+"""Генератор ответов для OpenAI-совместимого API со строгой проверкой цитат.
 
-The generator can be injected into ``AgentService`` (as its ``Answerer``) or
-used by ``RAGEngine``. Provider failures, invalid JSON, and schema violations
-are retried once by default and then converted into a safe ``abstain`` answer.
-Raw provider text is never copied into warnings or user-visible text.
+Генератор можно внедрить в ``AgentService`` как ``Answerer`` или использовать
+в ``RAGEngine``. Сбои провайдера, невалидный JSON и нарушения схемы по умолчанию
+повторяются один раз, после чего превращаются в безопасный ответ ``abstain``.
+Сырой текст провайдера никогда не попадает в предупреждения или ответ.
 """
 
 from __future__ import annotations
@@ -28,9 +28,9 @@ NO_EVIDENCE_TEXT = "В доступных материалах не найден
 GENERATION_UNAVAILABLE_TEXT = "Ответ не удалось безопасно сформировать."
 ABSTAIN_FALLBACK_TEXT = "В доступных источниках недостаточно подтверждений для ответа."
 
-#: Warning values that may be shown to the UI. Model-provided strings outside
-#: this set are replaced, so a provider cannot smuggle prompt/body text into an
-#: answer warning.
+#: Коды предупреждений, которые можно показывать в UI. Строки модели вне этого
+#: набора заменяются, поэтому провайдер не может протащить текст промпта/ответа
+#: в предупреждение.
 SAFE_WARNING_CODES = frozenset(
     {
         "missing_year",
@@ -44,7 +44,7 @@ SAFE_WARNING_CODES = frozenset(
 
 
 class _SchemaError(ValueError):
-    """Internal marker for an answer that violates the JSON contract."""
+    """Внутренний маркер ответа, нарушившего JSON-контракт."""
 
 
 def _get(value: Any, key: str, default: Any = None) -> Any:
@@ -54,7 +54,7 @@ def _get(value: Any, key: str, default: Any = None) -> Any:
 
 
 def _response_content(response: Any) -> str:
-    """Extract message text from an OpenAI-compatible response or fake."""
+    """Извлекает текст сообщения из OpenAI-совместимого ответа или заглушки."""
     try:
         choice = _get(response, "choices")[0]
         message = _get(choice, "message")
@@ -112,12 +112,12 @@ def _safe_warnings(values: Sequence[Any]) -> list[str]:
 
 
 class AnswerGenerator:
-    """Generate a grounded ``Answer`` with an injected chat client.
+    """Формирует обоснованный ``Answer`` через переданный чат-клиент.
 
-    ``max_retries`` is the number of *additional* attempts after the first one.
-    Citations outside ``evidence_manifest`` are dropped (documented choice);
-    if that leaves an ``answer`` without any citation, validation fails and is
-    retried. An abstain response must have empty citations and facts.
+    ``max_retries`` — число *дополнительных* попыток после первой. Цитаты вне
+    ``evidence_manifest`` отбрасываются (осознанное решение); если после этого
+    в ответе не осталось цитат, проверка не проходит и попытка повторяется.
+    Ответ ``abstain`` обязан иметь пустые цитаты и факты.
     """
 
     def __init__(
@@ -129,6 +129,7 @@ class AnswerGenerator:
         max_retries: int = 1,
         *,
         max_context_chars: int = DEFAULT_MAX_CONTEXT_CHARS,
+        max_context_tokens: int | None = None,
     ) -> None:
         if client is None:
             raise ValueError("client is required")
@@ -150,6 +151,15 @@ class AnswerGenerator:
             raise ValueError("max_context_chars must be a non-negative integer")
         if max_context_chars < 0:
             raise ValueError("max_context_chars must be a non-negative integer")
+        if max_context_tokens is not None:
+            if isinstance(max_context_tokens, bool) or not isinstance(
+                max_context_tokens, int
+            ):
+                raise ValueError(
+                    "max_context_tokens must be a non-negative integer or None")
+            if max_context_tokens < 0:
+                raise ValueError(
+                    "max_context_tokens must be a non-negative integer or None")
 
         self.client = client
         self.model = model
@@ -157,6 +167,7 @@ class AnswerGenerator:
         self.max_tokens = max_tokens
         self.max_retries = max_retries
         self.max_context_chars = max_context_chars
+        self.max_context_tokens = max_context_tokens
 
     def generate(
         self,
@@ -168,7 +179,7 @@ class AnswerGenerator:
         repair: bool = False,
         diagnostics: Mapping[str, Any] | None = None,
     ) -> Answer:
-        """Return a validated answer or a safe abstain; never raise provider text."""
+        """Возвращает проверенный ответ или безопасный abstain; текст провайдера не всплывает."""
         if not isinstance(question, str):
             raise TypeError("question must be a string")
         manifest = {
@@ -179,8 +190,8 @@ class AnswerGenerator:
         if not isinstance(evidence, Mapping) or not manifest:
             return Answer("abstain", NO_EVIDENCE_TEXT, warnings=["no_evidence"])
 
-        # Only manifest-authorized chunks may enter the prompt. Rebuild each
-        # hit so a missing inner chunk_id cannot hide the manifest key.
+        # В промпт попадают только чанки из манифеста. Пересобираем хит, чтобы
+        # отсутствующий внутренний chunk_id не скрыл ключ манифеста.
         allowed_hits: list[dict[str, Any]] = []
         for chunk_id, record in evidence.items():
             if chunk_id not in manifest or not isinstance(chunk_id, str):
@@ -197,7 +208,11 @@ class AnswerGenerator:
         if not allowed_hits:
             return Answer("abstain", NO_EVIDENCE_TEXT, warnings=["no_evidence"])
 
-        packed = pack_context(allowed_hits, max_chars=self.max_context_chars)
+        packed = pack_context(
+            allowed_hits,
+            max_chars=self.max_context_chars,
+            max_tokens=self.max_context_tokens,
+        )
         if not packed.records:
             return Answer("abstain", NO_EVIDENCE_TEXT, warnings=["no_evidence"])
 
@@ -226,7 +241,7 @@ class AnswerGenerator:
                 payload = _parse_json(_response_content(response))
                 return self._to_answer(payload, packed.evidence, manifest)
             except Exception:
-                # Deliberately do not retain or surface provider/exception text.
+                # Намеренно не сохраняем и не показываем текст провайдера/исключения.
                 continue
         return Answer(
             "abstain",
@@ -301,8 +316,8 @@ class AnswerGenerator:
             if not isinstance(chunk_id, str) or not chunk_id:
                 raise _SchemaError("citation chunk_id must be a non-empty string")
             if chunk_id not in manifest:
-                # Documented choice: ignore an invented/out-of-context citation
-                # rather than relaundering it into a valid-looking reference.
+                # Осознанное решение: выдуманную/неуместную цитату игнорируем,
+                # а не превращаем в ссылку, выглядящую допустимой.
                 dropped = True
                 continue
             if chunk_id in seen:

@@ -1,4 +1,4 @@
-"""Build a deterministic NetworkX graph from chunks and document structures."""
+"""Детерминированное построение графа NetworkX из чанков и структур документов."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from src.graph.graph_models import (
 
 
 def _read(value: Any, name: str, default: Any = None) -> Any:
-    """Read a field from either an ingestion dataclass or a mapping."""
+    """Читает поле из dataclass ingestion-слоя или из словаря."""
     if isinstance(value, Mapping):
         return value.get(name, default)
     return getattr(value, name, default)
@@ -104,13 +104,13 @@ def build_graph(
     relations: Sequence[RelationRecord | Mapping[str, Any]] = (),
     config: GraphBuildConfig | None = None,
 ) -> GraphBuildResult:
-    """Build graph nodes and edges from deterministic ingestion artifacts.
+    """Строит узлы и рёбра графа из детерминированных артефактов ingestion-слоя.
 
-    Structures are expected to be ``DocumentStructure`` instances (or their
-    dict representations); chunks use the current mapping-based K2 contract.
-    Optional entity records require ``name``, ``entity_type``/``type`` and
-    ``chunk_id``. Relations require subject/object and valid evidence chunk IDs.
-    No extractor or LLM is called.
+    Структуры ожидаются как ``DocumentStructure`` (или их словари); чанки
+    используют текущий словарный контракт К2. Необязательные записи сущностей
+    требуют ``name``, ``entity_type``/``type`` и ``chunk_id``. Связи требуют
+    subject/object и валидные ``chunk_id`` доказательств. Экстрактор и LLM не
+    вызываются.
     """
     config = config or GraphBuildConfig()
     graph = nx.MultiDiGraph()
@@ -186,7 +186,7 @@ def build_graph(
     for node_id, attrs in sorted(section_nodes.items()):
         graph.add_node(node_id, **attrs)
 
-    # Structural hierarchy comes from the supplied section artifacts.
+    # Иерархия структуры берётся из переданных артефактов разделов.
     for doc_id, structure in sorted(structures.items()):
         sections = _read(structure, "sections", ()) or ()
         for section in sections:
@@ -206,8 +206,8 @@ def build_graph(
                     extraction_version=None,
                 )
 
-    # Connect each chunk to its section by exact path when available, otherwise
-    # use the same page-start rule as ingestion's chunk enricher.
+    # Привязываем чанк к разделу по точному пути, иначе — по тому же правилу
+    # стартовой страницы, что и обогатитель чанков в ingestion.
     section_by_path: dict[str, dict[str, str]] = {}
     for node_id, attrs in section_nodes.items():
         section_by_path.setdefault(attrs["doc_id"], {})[attrs["section_path"]] = node_id
@@ -274,7 +274,7 @@ def build_graph(
         evidence = item.get("evidence_chunk_ids", ()) or ()
         evidence_ids = sorted({str(value) for value in evidence})
         if not subject or not obj or not evidence_ids:
-            # A relation without explicit evidence is not safe to traverse.
+            # Связь без явного доказательства небезопасно обходить.
             continue
         missing = set(evidence_ids) - chunks_by_id.keys()
         if missing:
@@ -345,7 +345,7 @@ def _resolve_relation_entity(
     entity_type: str,
     extraction_version: str | None,
 ) -> str:
-    """Reuse a uniquely named extracted entity when relation types are omitted."""
+    """Переиспользует однозначно найденную сущность, если тип связи не задан."""
     normalized = " ".join(name.split()).casefold()
     matching = [
         node_id for node_id, attrs in graph.nodes(data=True)
@@ -366,21 +366,21 @@ def _resolve_relation_entity(
 
 
 def graph_fingerprint(result: GraphBuildResult) -> str:
-    """Return a build result's stable content fingerprint."""
+    """Возвращает стабильный отпечаток содержимого результата сборки."""
     return result.graph_fingerprint
 
 
 def graph_to_dict(result: GraphBuildResult) -> dict[str, Any]:
-    """Return deterministic, JSON-serializable graph artifact contents."""
+    """Возвращает детерминированное JSON-сериализуемое содержимое артефакта графа."""
     return serialize_graph(result.graph, result.graph_fingerprint, result.manifest)
 
 
 def save_graph(result: GraphBuildResult, path: str | Path) -> Path:
-    """Atomically write a graph artifact as UTF-8 JSON.
+    """Атомарно записывает артефакт графа в UTF-8 JSON.
 
-    The parent directory is created when needed. Serialization completes in a
-    sibling temporary file before ``os.replace`` publishes the artifact, so a
-    failed write never leaves a partial target file.
+    Родительский каталог создаётся при необходимости. Сериализация завершается
+    во временном файле рядом, и только потом ``os.replace`` публикует артефакт,
+    поэтому неудачная запись не оставляет частичный целевой файл.
     """
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -410,11 +410,11 @@ def save_graph(result: GraphBuildResult, path: str | Path) -> Path:
 
 
 def load_graph(path: str | Path) -> GraphBuildResult:
-    """Load and validate a JSON graph artifact into a ``MultiDiGraph``.
+    """Загружает и проверяет JSON-артефакт графа в ``MultiDiGraph``.
 
-    Serialized ``provenance_source`` is restored to the graph edge attribute
-    ``source``. Evidence IDs are normalized to sorted unique strings and must
-    point to existing chunk nodes.
+    Сериализованный ``provenance_source`` восстанавливается в атрибут ребра
+    ``source``. ID доказательств нормализуются в отсортированные уникальные
+    строки и должны указывать на существующие узлы-чанки.
     """
     with Path(path).open("r", encoding="utf-8") as handle:
         artifact = json.load(handle)

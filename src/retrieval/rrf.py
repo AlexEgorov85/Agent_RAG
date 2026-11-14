@@ -1,4 +1,4 @@
-"""Deterministic reciprocal-rank fusion for mapping-style chunks."""
+"""Детерминированное reciprocal-rank fusion по чанкам-словарям."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ Chunk = Mapping[str, Any]
 
 
 def _chunk_id(chunk: Chunk) -> str:
-    """Get a chunk identifier from a flat or metadata-nested chunk mapping."""
+    """Достаёт ID чанка из плоского словаря или из вложенного ``metadata``."""
     value = chunk.get("chunk_id")
     if value is None:
         metadata = chunk.get("metadata")
@@ -26,11 +26,12 @@ def rrf(
     k: int = 10,
     constant: int = 60,
 ) -> list[dict[str, Any]]:
-    """Fuse ranked chunk lists and return at most ``k`` unique chunks.
+    """Сливает ранжированные списки чанков и возвращает не более ``k`` уникальных.
 
-    Each ranking contributes ``1 / (constant + rank)`` using one-based ranks.
-    Duplicate IDs contribute only their first occurrence in each list. Equal
-    fused scores preserve first-seen order across the input rankings.
+    Каждый список даёт вклад ``1 / (constant + rank)`` с рангами от 1.
+    Повторяющиеся ID учитываются только при первом вхождении в каждом списке.
+    При равных итоговых оценках сохраняется порядок первого появления по всем
+    входным спискам.
     """
     if k < 0:
         raise ValueError("k must be non-negative")

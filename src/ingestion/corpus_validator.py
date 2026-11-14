@@ -1,9 +1,8 @@
-"""Validation helpers for chunk corpora.
+"""Помощники проверки корпуса чанков.
 
-The validator is deliberately independent of PDF parsing and corpus storage:
-callers pass chunk mappings and the page count for each document explicitly.
-It reports all discoverable problems instead of stopping at the first invalid
-chunk.
+Валидатор намеренно не зависит от парсинга PDF и хранения корпуса: вызывающий
+передаёт словари чанков и число страниц каждого документа явно. Он сообщает обо
+всех найденных проблемах, а не останавливается на первом невалидном чанке.
 """
 
 from __future__ import annotations
@@ -27,10 +26,10 @@ _SHA256_PATTERN = re.compile(r"[0-9a-fA-F]{64}\Z")
 
 @dataclass(frozen=True)
 class ValidationFinding:
-    """One validation error or warning.
+    """Одна ошибка или предупреждение валидации.
 
-    ``chunk_index`` is zero-based and is ``None`` for corpus-wide findings.
-    ``chunk_id`` is included when it can be read from the associated chunk.
+    ``chunk_index`` считается с нуля и равен ``None`` для проблем всего корпуса.
+    ``chunk_id`` заполняется, когда его можно прочитать из связанного чанка.
     """
 
     code: str
@@ -41,7 +40,7 @@ class ValidationFinding:
 
 @dataclass
 class ValidationReport:
-    """Structured result returned by :func:`validate_corpus`."""
+    """Структурированный результат, возвращаемый :func:`validate_corpus`."""
 
     chunk_count: int
     structure_coverage: float
@@ -50,17 +49,17 @@ class ValidationReport:
 
     @property
     def is_valid(self) -> bool:
-        """Whether the corpus has no validation errors."""
+        """Проверяет, что в корпусе нет ошибок валидации."""
         return not self.errors
 
     @property
     def error_count(self) -> int:
-        """Number of errors in the report."""
+        """Число ошибок в отчёте."""
         return len(self.errors)
 
     @property
     def warning_count(self) -> int:
-        """Number of warnings in the report."""
+        """Число предупреждений в отчёте."""
         return len(self.warnings)
 
 
@@ -70,30 +69,31 @@ def validate_corpus(
     *,
     min_structure_coverage: float | None = None,
 ) -> ValidationReport:
-    """Validate chunk records against the ingestion and corpus contract.
+    """Проверяет записи чанков на соответствие контракту ingestion и корпуса.
 
-    Checks required chunk fields, non-empty searchable text, unique IDs,
-    1-based PDF page bounds, complete SHA-256 source hashes, table/HTML
-    consistency, and optional structural metadata. A structure-covered chunk
-    has all four structure fields and internally consistent breadcrumbs and
-    path.
+    Проверяются обязательные поля, непустой поисковый текст, уникальность ID,
+    границы PDF-страниц с нумерацией от 1, полные SHA-256 источников,
+    согласованность таблицы и HTML, а также необязательные структурные
+    метаданные. Чанк со структурой имеет все четыре поля, согласованные
+    breadcrumbs и путь.
 
     Args:
-        chunks: Corpus chunks, normally loaded from one or more chunk artifacts.
-        page_counts: Explicit mapping from ``doc_id`` to the source PDF's
-            positive page count. Counts are not inferred from chunk contents.
-        min_structure_coverage: Optional threshold from 0.0 through 1.0.
-            Falling below it adds a warning but does not invalidate an
-            otherwise error-free corpus.
+        chunks: Чанки корпуса, обычно загруженные из одного или нескольких
+            артефактов.
+        page_counts: Явное отображение ``doc_id`` в положительное число страниц
+            исходного PDF. Числа не выводятся из содержимого чанков.
+        min_structure_coverage: Необязательный порог от 0.0 до 1.0. Значение
+            ниже порога добавляет предупреждение, но не делает корпус без ошибок
+            невалидным.
 
     Returns:
-        A :class:`ValidationReport` containing all collected findings and
-        corpus counts. ``structure_coverage`` is a fraction in [0.0, 1.0];
-        for an empty corpus it is 0.0.
+        :class:`ValidationReport` со всеми найденными проблемами и счётчиками
+        корпуса. ``structure_coverage`` — доля в [0.0, 1.0]; для пустого
+        корпуса она равна 0.0.
 
     Raises:
-        ValueError: If the optional threshold is not a finite fraction between
-            zero and one.
+        ValueError: если необязательный порог не является конечной долей от нуля
+            до единицы.
     """
     if min_structure_coverage is not None and (
         not isinstance(min_structure_coverage, (int, float))

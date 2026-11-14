@@ -1,4 +1,4 @@
-"""Offline tests for the explicit API smoke-test entry point."""
+"""Офлайн-тесты явной точки входа smoke-теста API."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ class _Embeddings:
 class _Completions:
     def create(self, **kwargs: Any) -> Any:
         candidate_payload = kwargs["messages"][1]["content"]
-        # The fake returns scores for the two fixed smoke candidates.
+        # Заглушка возвращает оценки для двух фиксированных smoke-кандидатов.
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
