@@ -2,7 +2,7 @@
 
 **Версия:** 1.0
 **Статус:** целевой контракт; агент и WebUI ещё предстоит реализовать.
-**Связанные документы:** [spec_target.md](spec_target.md), [spec_retrieval_engine.md](spec_retrieval_engine.md), [spec_graph.md](spec_graph.md), [spec_ui_eval.md](spec_ui_eval.md)
+**Связанные документы:** [spec_target.md](spec_target.md), [spec_retrieval_engine.md](spec_retrieval_engine.md), [spec_graph.md](spec_graph.md), [spec_ui_eval.md](spec_ui_eval.md), [spec_agent_enhancement.md](spec_agent_enhancement.md)
 
 ## 1. Назначение
 

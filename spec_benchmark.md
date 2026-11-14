@@ -11,8 +11,19 @@
 [docs/specs/web-ui-modernization.md](docs/specs/web-ui-modernization.md)
 
 > Этот документ уточняет `spec_ui_eval.md` §2–§5 для agent-level benchmark. Где форматы
-> расходятся, приоритет у этого документа; UI-контракт §1 и общие release-метрики §3
-> сохраняются. Benchmark не заменяет `scripts/eval_retrieval.py`: скрипт остаётся
+> расходятся, приоритет у этого документа. `spec_ui_eval.md` §1 (Streamlit UI) —
+> исторический контракт, заменённый `docs/specs/web-ui-modernization.md`; этот документ
+> его не сохраняет и не продлевает.
+>
+> **Иерархия источников истины:**
+>
+> 1. `spec_benchmark.md` — датасет, trace, метрики, артефакты, CLI-runner;
+> 2. `docs/specs/web-ui-modernization.md` — общий React UI и API adapter;
+> 3. `docs/specs/evaluation-webui.md` — раздел Benchmark в React и Evaluation API.
+>
+> `spec_ui_eval.md` §2–§6 считается исходным предложением. Его общие release-метрики §3
+> сохраняются как исторические целевые значения, но agent-level отчёт считается по §5
+> этого документа. Benchmark не заменяет `scripts/eval_retrieval.py`: скрипт остаётся
 > компонентным retrieval-пробником, новый контур оценивает всю цепочку агента.
 
 ## 1. Назначение и границы
@@ -76,13 +87,14 @@ Question → Query Plan → Search Queries → Retrieved Chunks → Evidence →
 
 ### 1.5. Канонический путь
 
-Пакет называется `eval/` — как в Target Code Map и `spec_ui_eval.md`. Структура из
-предложения сохраняется; переименование в `evaluation/` не требуется, иначе в проекте
-появятся два конкурирующих контура.
+Пакет называется `eval/` — как в Target Code Map и историческом `spec_ui_eval.md`.
+Структура из предложения сохраняется; переименование в `evaluation/` не требуется,
+иначе в проекте появятся два конкурирующих контура.
 
 ```text
 eval/
 ├── datasets/
+│   ├── manifest.json
 │   ├── easy.json
 │   ├── medium.json
 │   ├── hard.json
@@ -175,7 +187,10 @@ agent-level тест провален, и для проверки режимов
 `docs/specs/evaluation-webui.md`. Этот документ остаётся источником истины для
 датасета, trace, метрик и артефактов; UI-спецификация — для навигации, API,
 очереди, хранения и отображения. Benchmark не запускается в браузере и не
-дублирует `AgentService`.
+дублирует `AgentService`. При конфликте UI-формулировок приоритет у
+`web-ui-modernization.md` и `evaluation-webui.md`; при конфликте форматов
+результатов — у этого документа. Streamlit-контракт `spec_ui_eval.md` §1 не
+действует.
 
 ## 3. Формат датасета
 
@@ -187,12 +202,54 @@ agent-level тест провален, и для проверки режимов
 {
   "schema_version": "1.0",
   "suite": "easy",
+  "expected_corpus_sha256": "<sha256-hex>",
   "tests": []
 }
 ```
 
 `suite` обязан совпадать с именем файла: `easy`, `medium`, `hard`, `multi_turn`.
 Допускается один файл на suite; дробить на десятки файлов не нужно.
+
+`expected_corpus_sha256` фиксирует версию корпуса, по которой размечены
+`gold_evidence` и `chunk_id`. Без этого hash можно незаметно пересобрать корпус:
+формально chunk ID сохранятся, а эталон устареет.
+
+Правила:
+
+- hash считается по содержимому корпуса, а не по индексу: `chunk_id`, `doc_id`,
+  `text` и `source_sha256` каждого чанка, отсортированные по `chunk_id`, канонический
+  JSON UTF-8. Модель эмбеддингов и конфигурация индекса в этот hash **не входят**;
+- все suite-файлы одного набора обязаны иметь одинаковый `expected_corpus_sha256`;
+- `corpus_fingerprint` из `src/core/cache.py` — это другой hash: он включает модель,
+  `embedding_config` и `source_hashes` и адресует кэш индекса. Для сопоставимости
+  benchmark используется content hash, а `corpus_fingerprint` показывается как версия
+  индекса;
+- смена модели эмбеддингов меняет `corpus_fingerprint`, но не делает эталон
+  несопоставимым;
+- изменение текста чанка или `doc_id` меняет content hash и требует нового ревью
+  эталона.
+
+`eval/datasets/manifest.json` — versioned-манифест набора:
+
+```json
+{
+  "dataset_version": "1.0",
+  "created_at": "2026-11-14T00:00:00Z",
+  "expected_corpus_sha256": "<sha256-hex>",
+  "chunk_count": 0,
+  "documents": ["sber_2020", "sber_2022", "sber_2023", "sber_2024"],
+  "suite_hashes": {
+    "easy": "<sha256-hex>",
+    "medium": "<sha256-hex>",
+    "hard": "<sha256-hex>",
+    "multi_turn": "<sha256-hex>"
+  }
+}
+```
+
+Манифест не заменяет suite-файлы и не дублирует тесты; он фиксирует версию набора и
+корпуса. `dataset.sha256` по-прежнему считается по suite-файлам (§3.9, п. 15);
+`manifest.json` проверяется на согласованность с ними.
 
 ### 3.2. Поля одиночного теста
 
@@ -265,6 +322,7 @@ agent-level тест провален, и для проверки режимов
     "max_search_calls": 2,
     "max_tool_calls": 4,
     "must_use_tools": ["search_reports"],
+    "must_use_tools_strict": true,
     "may_use_tools": ["get_chunk"],
     "must_not_use_tools": [],
     "strict_search_budget": false,
@@ -378,12 +436,29 @@ agent-level тест провален, и для проверки режимов
 | `retrieval_modes` | Какие режимы допустимы; обычно `["hybrid"]` |
 | `max_search_calls` | Лимит `search_reports` на turn; превышение — warning `excess_search_calls` |
 | `max_tool_calls` | Общий лимит инструментов на turn |
-| `must_use_tools` | Инструменты, которые обязаны быть вызваны |
+| `must_use_tools` | Инструменты, которые обязаны быть вызваны при `must_use_tools_strict=true`; иначе — предпочтительный маршрут |
 | `may_use_tools` | Разрешённые, но не обязательные |
-| `must_not_use_tools` | Запрещённые для этого теста |
+| `must_not_use_tools` | Запрещённые для этого теста; проверяется всегда строго |
+| `must_use_tools_strict` | Если `true`, отсутствие инструмента — провал; по умолчанию `false` |
 | `strict_search_budget` | Если `true`, превышение бюджета делает тест провальным |
 | `must_cite_sources` | Требовать хотя бы одну валидную citation |
 | `must_abstain_if_missing` | При отсутствии evidence ожидается abstain, а не догадка |
+
+Основной критерий качества — правильные evidence, citations и результат. Проверка
+конкретной последовательности инструментов не должна его подменять: агент может прийти
+к тем же доказательствам допустимым альтернативным маршрутом.
+
+Поэтому:
+
+- `must_not_use_tools` — строгая проверка, нарушение всегда проваливает тест;
+- `must_use_tools` — провал только при `must_use_tools_strict=true`; иначе другой
+  маршрут даёт warning `alternative_tool_path` и не проваливает тест, если evidence,
+  citations и результат корректны;
+- `must_use_tools_strict=true` ставится только там, где вызов инструмента является
+  смыслом сценария: например, `compare_structures` в structural-тесте или `get_chunk`
+  для проверки graph evidence;
+- отсутствие `must_use_tools_strict` означает `false`; валидатор не требует
+  ужесточать его для обычных factoid-тестов.
 
 Если `max_search_calls`/`max_tool_calls` не заданы, действуют defaults:
 
@@ -598,10 +673,18 @@ Defaults не могут превышать системные лимиты (`MA
 12. Нет абсолютных путей, секретов и фантазийных `chunk_id`.
 13. `reference_answer` не используется как exact match.
 14. Инструменты в `must_use_tools`/`may_use_tools`/`must_not_use_tools` входят в
-    allowlist `AgentTools`; `scenario_checks`/`behavior` — из известного словаря.
+    allowlist `AgentTools`; `scenario_checks`/`behavior` — из известного словаря;
+    `must_use_tools_strict` — булево и не может быть `true` для пустого
+    `must_use_tools`.
 15. SHA-256 датасета считается по всем suite-файлам в фиксированном порядке
     (имя файла + канонический JSON с сортировкой ключей, UTF-8) и попадает в
     `summary.json`.
+16. `expected_corpus_sha256` одинаков во всех suite-файлах и совпадает с текущим
+    content hash корпуса. Несовпадение — `dataset_corpus_mismatch`: прогон не
+    стартует, а не помечает тесты провальными.
+17. `eval/datasets/manifest.json`, если присутствует, согласован с suite-файлами:
+    `dataset_version`, `suite_hashes`, `expected_corpus_sha256` и `chunk_count`.
+    Расхождение — ошибка датасета.
 
 ### 3.10. Состав и качество набора
 
@@ -651,6 +734,8 @@ Defaults не могут превышать системные лимиты (`MA
   "trace_schema_version": "1.0",
   "run_id": "20261114_120000_f77652a",
   "test_id": "easy_001",
+  "retrieval_mode": "hybrid",
+  "attempt_index": 0,
   "conversation_id": "bench-easy_001-...",
   "started_at": "2026-11-14T12:00:00Z",
   "duration_ms": 12345.6,
@@ -658,6 +743,7 @@ Defaults не могут превышать системные лимиты (`MA
   "git_sha": "f77652a",
   "git_dirty": false,
   "dataset_sha256": "...",
+  "corpus_sha256": "...",
   "corpus_fingerprint": "...",
   "config_fingerprint": "...",
   "turns": [
@@ -778,8 +864,14 @@ Defaults не могут превышать системные лимиты (`MA
 
 ### 4.2. Обязательные поля
 
+Поля `query_plan`, `effective_filters`, `search_attempts`, `retrieval_calls`,
+`evidence_manifest`, `context_chunk_ids`, `covered_years`/`missing_years` читаются из
+единого контейнера `AgentRunResult.diagnostics` (§4.4); они не вводятся отдельными
+полями результата.
+
 | Поле | Назначение |
 |---|---|
+| `retrieval_mode` / `attempt_index` | Идентичность результата вместе с `test_id` |
 | `query_plan` | Проверка понимания вопроса: intent, годы, метрики, режим |
 | `effective_filters` | Какие фильтры реально применены |
 | `tool_events` | Наблюдаемые вызовы инструментов и их статусы |
@@ -829,14 +921,54 @@ Defaults не могут превышать системные лимиты (`MA
    (`stages`) и счётчиками. Семантика поиска не меняется.
 2. `PerYearSearch` и `GraphAugmentedRetriever` копируют базовый trace и добавляют
    свои этапы; при отсутствии данных ставят `available=false`.
-3. `AgentService` уже хранит `state["retrieval_results"]`; в
-   `AgentRunResult.diagnostics` добавляются `query_plan`, `effective_filters`,
-   `search_attempts`, `evidence_manifest`, `context_chunk_ids`, `retrieval_calls`,
-   `coverage`, `verification`.
-4. `diagnostics` — новое поле с `field(default_factory=dict)`; старые вызовы и тесты
-   не ломаются.
-5. Если `context_chunk_ids` недоступны, используется `evidence_manifest` с
-   `context_source="evidence_manifest"`; это явно помечается в отчёте.
+3. `AgentService` уже хранит `state` и `state["retrieval_results"]`; он собирает один
+   объект `AgentRunResult.diagnostics`. Отдельные поля `query_plan`,
+   `retrieval_calls`, `coverage`, `verification` в `AgentRunResult` не вводятся:
+   иначе один результат придётся синхронизировать в нескольких местах.
+4. `diagnostics` — поле с `field(default_factory=dict)`; старые вызовы и тесты не
+   ломаются.
+5. `calculations` остаются в `Answer.calculations` и в совместимом зеркале
+   `AgentRunResult.calculations`; в `diagnostics` они не дублируются.
+
+#### Контракт `AgentRunResult.diagnostics`
+
+```text
+AgentRunResult
+├── answer                     # Answer
+├── tool_events                # list[ToolEvent]
+├── effective_filters          # SearchFilters
+├── status                     # completed | abstained | failed
+├── warnings                   # list[str]
+├── timings                    # dict[str, float]
+├── structural_changes         # list[dict] — совместимое зеркало
+├── calculations               # list[dict] — совместимое зеркало Answer
+└── diagnostics                # dict[str, Any]
+    ├── query_plan             # QueryPlan.to_dict() | null
+    ├── search_attempts        # list[dict]
+    ├── retrieval_calls        # list[dict] — этапы dense/BM25/graph/RRF/rerank/returned/context
+    ├── evidence_manifest      # list[chunk_id]
+    ├── context_chunk_ids      # list[chunk_id] | null
+    ├── context_source         # "context" | "evidence_manifest"
+    ├── coverage               # CoverageReport.to_dict() | null
+    ├── verification           # VerificationResult.to_dict() | null
+    └── structural_changes     # list[dict] | null
+```
+
+Правила:
+
+- benchmark читает только `diagnostics` и `Answer`; отдельные поля результата не
+  являются альтернативным источником;
+- `AgentRunResult.structural_changes` и `AgentRunResult.calculations` сохраняются как
+  совместимые зеркала для существующего UI/тестов и заполняются из тех же объектов, а
+  не пересчитываются вторым путём;
+- `retrieval_diagnostics` из рабочего дерева — deprecated alias на
+  `diagnostics["retrieval_calls"]`. Новый код и benchmark не должны его требовать;
+  alias удаляется после миграции потребителей;
+- каждое поле либо измерено, либо равно `null`; если компонент ещё не реализован
+  (P1–P8 в `spec_agent_enhancement.md`), evaluator ставит `not_measured`, а не
+  придумывает значение;
+- `context_chunk_ids` может отсутствовать: тогда используется `evidence_manifest` с
+  `context_source="evidence_manifest"`, и это явно помечается в отчёте.
 
 Запрещено:
 
@@ -853,7 +985,8 @@ Defaults не могут превышать системные лимиты (`MA
 - Секреты, заголовки запросов и ключи не сохраняются.
 - Лимит одного trace — 5 МБ; при превышении списки этапов обрезаются с
   `truncated=true`, а не молча теряются.
-- `cases.jsonl` не дублирует полные этапы; он ссылается на `traces/{test_id}.json`.
+- `cases.jsonl` не дублирует полные этапы; он ссылается на
+  `traces/{test_id}.{retrieval_mode}[.attempt_{n}].json`.
 
 ## 5. Оценка
 
@@ -940,7 +1073,7 @@ covered(g, R) = any(chunk_id in R for chunk_id in g.any_of)
 | `numeric_claim_unverified` | число с единицей без факта/citation | warning или critical по флагу |
 | `wrong_document` | citation из неожидаемого документа | warning/critical для факта |
 | `structural_changes` | `AgentRunResult.structural_changes` | fail для structural-тестов |
-| `tool_behavior` | `must_use_tools` / `must_not_use_tools` по `tool_events` | fail при нарушении |
+| `tool_behavior` | `must_not_use_tools` — всегда; `must_use_tools` — только при `must_use_tools_strict` | fail для strict-нарушений; иначе warning `alternative_tool_path` |
 
 Если `context_chunk_ids` недоступны, `citation_validity` проверяется только по
 `evidence_manifest`, а проверка контекста помечается `not_measured`; это не должно
@@ -1114,20 +1247,80 @@ scenario_success =
 Частичный результат сохраняется для диагностики, но не считается успехом. При
 `cascade_failure` последующие успехи не маскируют потерю контекста.
 
-### 5.9. Ошибки выполнения
+### 5.9. Статусы и ошибки выполнения
 
-| Статус | Значение | Учёт |
+Статусы четырёх уровней независимы. Нельзя выводить один уровень из другого и нельзя
+смешивать их в одном поле.
+
+| Уровень | Поле | Значения |
 |---|---|---|
-| `completed` | Тест выполнен | Входит в denominator |
-| `failed` | Агент вернул `failed` | Провал, входит в denominator |
-| `timeout` | Превышен лимит turn'а | Провал, входит в denominator |
-| `error` | Ошибка runner/evaluator | Провал, виден в coverage |
-| `unsupported_mode` | Backend не поддерживает режим | `skipped`, не маскируется hybrid |
-| `invalid_dataset` | Ошибка эталона | Прогон не стартует |
-| `judge_error` | Судья вернул невалидный JSON | Виден отдельно, не ноль |
+| Agent execution | `AgentRunResult.status` | `completed` / `abstained` / `failed` |
+| Answer | `Answer.status` | `answer` / `abstain` |
+| Test result | `cases.jsonl.status` | `completed` / `failed` / `timeout` / `error` / `skipped` |
+| Evaluation run | WebUI/API `EvaluationRun.status` | `queued` / `running` / `cancel_requested` / `completed` / `failed` / `cancelled` / `interrupted` |
 
-В `summary.json` всегда есть `coverage`: сколько тестов выполнено, провалено,
-пропущено и почему. Ошибка отдельного теста не должна молча превращаться в `0.0`.
+Правила:
+
+- `abstained` — успешное выполнение агента, который обоснованно отказался отвечать.
+  Это не `failed` и не ошибка benchmark.
+- `Answer.status=abstain` при `AgentRunResult.status=abstained` — штатная пара; тест
+  проходит, если `expected_status=abstain`.
+- Test result `completed` означает, что turn'ы выполнены. Провал или прохождение
+  определяется §5.10, а не статусом выполнения.
+- Test result `failed` — только `AgentRunResult.status=failed` или исчерпан repair
+  цикла; это не то же самое, что неправильный ответ при `completed`.
+- `timeout`, `error`, `skipped` — статусы выполнения теста.
+- `invalid_dataset` — не статус теста: прогон не стартует.
+- `unsupported_mode` — причина `skipped`, а не отдельный статус и не `failed`.
+- `judge_error` — не статус теста: deterministic-результат остаётся валидным,
+  judge-метрики равны `null`, счётчик `judge_errors` растёт.
+- `cancel_requested` и `interrupted` относятся только к evaluation run в API; CLI
+  benchmark их не пишет.
+
+Соответствие причин и статусов:
+
+| Причина / код | Test result | Что видно в отчёте |
+|---|---|---|
+| `unsupported_mode` | `skipped` | `unsupported=+1`, причина режима |
+| `invalid_dataset` | — | прогон не стартует, код 2 |
+| `judge_error` | `completed` | `judge_errors=+1`, judge-поля `null` |
+| timeout turn'а | `timeout` | `timeouts=+1`, тест не проходит |
+| ошибка runner/evaluator | `error` | `errors=+1`, текст ошибки |
+| отмена пользователем | `skipped` (частично) | run `cancelled`, тесты без результата не считаются выполненными |
+
+#### Coverage и denominator
+
+`coverage` в `summary.json` различает отбор, допуск и фактическое выполнение:
+
+```text
+tests_selected      # после suite/split/tag/ids/limit
+tests_eligible      # selected - unsupported - invalid; участвуют в pass rate
+executed            # turn'ы реально выполнены: completed/failed/timeout/error
+passed
+failed
+skipped             # unsupported_mode или явный пропуск
+unsupported         # подмножество skipped
+timeouts
+errors              # runner/evaluator
+judge_errors
+```
+
+```text
+pass_rate = passed / tests_eligible
+execution_coverage = executed / tests_selected
+```
+
+Правила:
+
+- `skipped`, `unsupported` и `errors` не попадают в знаменатель `pass_rate`, но всегда
+  показываются рядом с ним;
+- если `tests_eligible = 0`, `pass_rate = null` (`—`), а не `0.0`;
+- `pass_at_1` — `pass_rate`, посчитанный только по `attempt_index=0`; `stability`
+  считается по повторам отдельно;
+- нельзя показывать высокий pass rate без execution coverage: 18/20 и 18/30 — разные
+  результаты, и оба числа обязаны быть видны;
+- ошибка отдельного теста не превращается в `0.0`.
+
 Автоматических retry нет: повтор — только явный `--repeat`, и все попытки сохраняются
 в результатах.
 
@@ -1135,13 +1328,19 @@ scenario_success =
 
 ```text
 test_pass =
-  execution status == completed/abstained
-  и expected_status совпал
-  и нет critical errors
-  и все mandatory automatic checks прошли
-  и Evidence Coverage >= gold_evidence.min_coverage
-  и (если есть judge/manual) rubric total не ниже явно заданного порога теста
+    AgentRunResult.status in {completed, abstained}
+    и Answer.status == expected_status
+    и нет critical errors
+    и все mandatory automatic checks прошли
+    и Evidence Coverage >= gold_evidence.min_coverage
+    и (если есть judge/manual) rubric total не ниже явно заданного порога теста
 ```
+
+- `abstained` проходит только тест с `expected_status=abstain`. Если ожидался ответ,
+  тест провален по `status_accuracy`, а не по execution status.
+- `failed`, `timeout`, `error`, `skipped` — всегда `pass=false`.
+- `completed` с неверным ответом — `pass=false`, но это результат оценки, а не сбой
+  выполнения.
 
 `test_pass` — для pass rate. Rubric score и retrieval-метрики публикуются отдельно.
 Единый `Agent Quality` не вычисляется.
@@ -1156,9 +1355,10 @@ eval/results/{run_id}/
 ├── cases.jsonl
 ├── retrieval.csv
 ├── traces/
-│   ├── easy_001.json
-│   ├── easy_002.json
-│   ├── medium_001.json
+│   ├── easy_001.hybrid.json
+│   ├── easy_001.dense.json
+│   ├── easy_001.keyword.json
+│   ├── easy_002.hybrid.json
 │   └── ...
 ├── judge.jsonl          # если судья включён
 ├── manual_review.json   # если есть ручная проверка
@@ -1168,14 +1368,19 @@ eval/results/{run_id}/
 └── comparison.md
 ```
 
-`run_id` — `YYYYMMDD_HHMMSS_{short_sha}`. Один JSON на тест в `traces/`; при
-`--repeat` — `traces/{test_id}.attempt_{n}.json`. `cases.jsonl` содержит краткую
-запись на attempt и ссылку на соответствующий trace.
+Идентичность результата — `(run_id, test_id, retrieval_mode, attempt_index)`.
+`attempt_index` относится к повтору конкретной пары `test_id + retrieval_mode` и
+начинается с 0, а не к повтору теста вообще.
+
+`run_id` — `YYYYMMDD_HHMMSS_{short_sha}`. Один JSON на result identity:
+`traces/{test_id}.{retrieval_mode}.json` для attempt 0 и
+`traces/{test_id}.{retrieval_mode}.attempt_{n}.json` для повторов. `cases.jsonl`
+содержит краткую запись на attempt и ссылку на соответствующий trace.
 
 `retrieval.csv` — плоская таблица для анализа:
 
 ```text
-test_id, retrieval_mode, call_index, stage, rank, chunk_id, score, in_gold, loss_stage
+test_id, retrieval_mode, attempt_index, call_index, stage, rank, chunk_id, score, in_gold, loss_stage
 ```
 
 `stage` ∈ `dense|bm25|graph|rrf|rerank|returned|context`; `in_gold` — бинарный флаг
@@ -1192,8 +1397,20 @@ test_id, retrieval_mode, call_index, stage, rank, chunk_id, score, in_gold, loss
   "finished_at": "...",
   "command": "...",
   "git": {"sha": "...", "dirty": false},
-  "dataset": {"version": "1.0", "sha256": "...", "tests": 30},
+  "dataset": {
+    "version": "1.0",
+    "sha256": "...",
+    "tests": 30,
+    "expected_corpus_sha256": "...",
+    "suites": {
+      "easy": "...",
+      "medium": "...",
+      "hard": "...",
+      "multi_turn": "..."
+    }
+  },
   "corpus": {
+    "content_sha256": "...",
     "chunk_count": 0,
     "documents": ["sber_2020", "sber_2022", "sber_2023", "sber_2024"],
     "index_fingerprint": "...",
@@ -1220,14 +1437,32 @@ test_id, retrieval_mode, call_index, stage, rank, chunk_id, score, in_gold, loss
     "answer": "sha256:...",
     "judge": null
   },
+  "capabilities": {
+    "retrieval_modes": ["hybrid"],
+    "query_plan": false,
+    "coverage": false,
+    "rewriting": false,
+    "structural_changes": false,
+    "calculations": false,
+    "graph": false,
+    "verification": false,
+    "judge": false
+  },
   "coverage": {
-    "tests_total": 30,
+    "tests_selected": 30,
+    "tests_eligible": 30,
     "executed": 30,
+    "passed": 0,
     "failed": 0,
     "skipped": 0,
-    "errors": 0
+    "unsupported": 0,
+    "timeouts": 0,
+    "errors": 0,
+    "judge_errors": 0
   },
-  "pass_at_1": 0.0,
+  "pass_rate": null,
+  "execution_coverage": 0.0,
+  "pass_at_1": null,
   "stability": null,
   "groups": {
     "retrieval": {
@@ -1290,14 +1525,30 @@ test_id, retrieval_mode, call_index, stage, rank, chunk_id, score, in_gold, loss
 `0.0` в примере — заполнитель схемы; реальный отчёт не должен выдумывать значения.
 Если метрика не измерялась, используется `null`, а не ноль.
 
+`dataset.expected_corpus_sha256` и `corpus.content_sha256` — content hash корпуса из
+§3.1. `corpus.index_fingerprint` — `corpus_fingerprint` из `src/core/cache.py`,
+включающий модель и конфигурацию эмбеддингов; он меняется при переиндексации, но сам
+по себе не делает сравнение недопустимым.
+
+`capabilities` фиксирует, какие возможности P1–P8 реально доступны в этом прогоне.
+Если capability `false`, соответствующие метрики равны `null` и помечены
+`not_measured`; тест не может пройти только за счёт заглушки. `unsupported_mode`
+попадает в `coverage.unsupported` и одновременно в `skipped`.
+
+`pass_rate` и `execution_coverage` считаются по формулам §5.9. Если
+`tests_eligible = 0`, `pass_rate` и `pass_at_1` равны `null`, а не `0.0`.
+`coverage.passed` — число прошедших тестов, а не `pass_rate`. `by_mode` внутри
+`groups.retrieval` содержит отдельный coverage и метрики для каждого режима.
+
 `by_difficulty.multi_turn` — это bucket по suite `multi_turn`, а не значение поля
 `difficulty`; так отчёт не смешивает многошаговые сценарии с medium-вопросами.
 
 ### 6.3. `cases.jsonl`
 
-Одна строка на тест; при `--repeat N` — одна строка на attempt с `attempt_index`.
-Итоговый `pass` теста считается по `pass_at_1`, а `stability` — по доле успешных
-повторов.
+Одна строка на attempt конкретной пары `test_id + retrieval_mode`; уникальный ключ —
+`(test_id, retrieval_mode, attempt_index)` внутри `run_id`. При `--repeat N` —
+N строк на каждую пару. Итоговый `pass` теста считается по `pass_at_1`, а `stability`
+— по доле успешных повторов.
 
 ```json
 {
@@ -1335,7 +1586,7 @@ test_id, retrieval_mode, call_index, stage, rank, chunk_id, score, in_gold, loss
     "llm_calls": null,
     "latency_ms": 12345.6
   },
-  "trace_path": "traces/easy_001.json"
+  "trace_path": "traces/easy_001.hybrid.json"
 }
 ```
 
@@ -1405,7 +1656,9 @@ Problems: ...
 
 Правила:
 
-- Сравнение допустимо только при совпадении `dataset.sha256`; иначе — явный warning.
+- Сравнение регулируется таблицей §8.3: дельты выдаются только при совпадении
+  `dataset.sha256`, набора тестов, split и `corpus.content_sha256`; иначе — только
+  side-by-side и `not_comparable`.
 - Показываются не только средние, но и тесты, изменившие статус `pass`/`fail`.
 - Ухудшение простых тестов при улучшении сложных видно отдельно.
 - Не выбирается «лучший» прогон; сравниваются все зафиксированные метрики.
@@ -1478,6 +1731,8 @@ def run_suite(
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
     cancel_event: Any | None = None,
     service: Any | None = None,
+    llm_lock: Any | None = None,
+    wait_for_llm: bool = True,
     out_dir: Path | None = None,
 ) -> Path:
     """Запускает suite, пишет артефакты и возвращает каталог run'а."""
@@ -1485,8 +1740,12 @@ def run_suite(
 
 `progress_callback` получает события `run_started`, `test_started`,
 `test_completed`, `run_completed`, `run_failed`; для `test_completed` передаются
-`test_id`, `status`, `pass` и текущий progress. `service` позволяет передать уже
-созданный/сериализованный `AgentService` (например, `ExecutionGate`-обёртку).
+`test_id`, `retrieval_mode`, `attempt_index`, `status`, `pass` и текущий progress.
+`service` позволяет передать уже созданный `AgentService` (например,
+`ExecutionGate`-обёртку API-процесса). `llm_lock` — общий межпроцессный lock
+(`LLMExecutionLock`, см. `evaluation-webui.md` §9.2); если не передан, runner создаёт
+его сам по `LLM_LOCK_PATH`. `wait_for_llm=false` превращает занятый lock в код 5
+`llm_busy` вместо ожидания.
 
 ### 7.3. Флаги
 
@@ -1497,7 +1756,7 @@ def run_suite(
 | `--ids` | Список ID через запятую |
 | `--tag` | Фильтр по тегу, например `smoke` |
 | `--limit` | Ограничить число тестов |
-| `--retrieval-mode` | `hybrid`, `dense`, `keyword`, `all`; `all` гоняет каждый тест отдельно в каждом режиме и сохраняет `by_mode` |
+| `--retrieval-mode` | `hybrid`, `dense`, `keyword`, `all`; `all` гоняет каждый тест отдельно в каждом режиме, сохраняет `by_mode` и отдельный trace на режим |
 | `--repeat` | Повторы; по умолчанию 1 |
 | `--judge` / `--no-judge` | Включить/выключить судью; по умолчанию выключен (smoke должен быть дешёвым; `--no-judge` принимается для совместимости) |
 | `--fresh-service` | Новый `AgentService` на каждый тест |
@@ -1505,15 +1764,17 @@ def run_suite(
 | `--out` | Каталог результатов |
 | `--fail-under` | Опциональный порог pass rate для CI |
 | `--timeout` | Лимит на turn, секунды |
+| `--wait-for-llm` / `--no-wait` | Ждать межпроцессный LLM-lock или сразу завершиться кодом 5 |
 
 ### 7.4. Коды возврата
 
 | Код | Значение |
 |---|---|
 | 0 | Прогон завершён; тесты могут быть провалены |
-| 2 | Ошибка датасета/конфигурации |
+| 2 | Ошибка датасета/конфигурации (включая `dataset_corpus_mismatch`) |
 | 3 | Ошибка runner/окружения |
 | 4 | `--fail-under` не достигнут |
+| 5 | `llm_busy`: межпроцессный LLM-lock занят, а `--no-wait` запрещает ожидание |
 
 Провал теста — это результат оценки, а не сбой runner. Поэтому код 0 при наличии
 failed-тестов допустим; CI-гейт включается явным `--fail-under`.
@@ -1521,6 +1782,8 @@ failed-тестов допустим; CI-гейт включается явны�
 ### 7.5. Требования к окружению
 
 - Live-прогон требует `LLM_API_KEY`/`LLM_BASE_URL` и собранный chunk store.
+- Live-прогон требует эксклюзивный `LLMExecutionLock`; путь задаётся `LLM_LOCK_PATH`
+  (по умолчанию `data/evaluation/llm.lock`). Без lock'а запуск запрещён.
 - Offline-тесты benchmark используют fake `AgentService`/fake client и не ходят в сеть.
 - Секреты не попадают в артефакты, консоль и HTML.
 - При отсутствии ключа runner завершается понятной ошибкой, а не пустым отчётом.
@@ -1533,8 +1796,11 @@ failed-тестов допустим; CI-гейт включается явны�
 |---|---|
 | Git SHA + dirty | `git rev-parse HEAD`, `git status --porcelain` |
 | Dataset hash | SHA-256 всех suite-файлов в фиксированном порядке, канонический JSON |
-| Corpus fingerprint | Число чанков, doc_id, source hashes/index build hash |
+| Dataset version | `eval/datasets/manifest.json` |
+| Corpus content hash | `expected_corpus_sha256`: `chunk_id` + `doc_id` + `text` + `source_sha256` |
+| Corpus index fingerprint | `corpus_fingerprint` из `src/core/cache.py`: контент + модель + embedding config |
 | Retrieval config | mode, top_k, candidates, rerank_pool, graph on/off |
+| Capabilities | какие P1–P8 доступны в прогоне |
 | LLM | model id, temperature, top_p, max_tokens |
 | Reranker | model id, режим fallback |
 | Judge | model id, prompt version/hash, temperature |
@@ -1552,16 +1818,33 @@ failed-тестов допустим; CI-гейт включается явны�
 
 ### 8.3. Сравнение версий
 
-Для корректного сравнения:
+Сопоставимость определяется эталонной базой, а не версией кода агента. Мы как раз
+хотим сравнивать прогоны после изменения reranker, модели или retrieval, поэтому git
+SHA и конфиг агента сравнение не блокируют.
 
-- одинаковый `dataset.sha256`;
-- одинаковый набор тестов и split;
-- зафиксированные модели и параметры;
-- одинаковый корпус;
-- сохранённые конфиги обоих прогонов.
+| Условие | Сравнение |
+|---|---|
+| Совпадают `dataset.sha256`, набор тестов, split и `corpus.content_sha256` | Полное сравнение с дельтами |
+| Разный `dataset.sha256` | Только side-by-side, `not_comparable` |
+| Разный `corpus.content_sha256` | Только side-by-side, `not_comparable` |
+| Разный набор тестов или split | Только side-by-side, `not_comparable` |
+| Разный git SHA / `dirty` | Разрешено; показывается как версия |
+| Другая LLM/reranker/judge-модель | Разрешено; различия показываются |
+| Другой retrieval config (mode/top_k/rerank_pool/graph) | Разрешено; различия показываются |
+| Другой `corpus.index_fingerprint` при том же content hash | Разрешено; показывается как переиндексация |
 
-Если датасет или корпус изменились, сравнение помечается `not_comparable`, а не
-выдаётся как регрессия.
+Правила:
+
+- `not_comparable` — не ошибка и не регрессия; это запрет на надёжные дельты;
+- side-by-side разрешён всегда, но не выдаётся за измерение эффекта изменения;
+- `corpus.content_sha256` берётся из `dataset.expected_corpus_sha256` и проверяется
+  валидатором до прогона (§3.9, п. 16). Если корпус изменился, эталон уже устарел;
+- `corpus.index_fingerprint` включает модель эмбеддингов и конфигурацию индекса.
+  Поэтому смена embedding-модели — это переиндексация, а не другой корпус;
+- сравнение всегда сохраняет оба конфига и обе версии; «лучший» прогон не выбирается.
+
+Если датасет или content hash корпуса изменились, сравнение помечается
+`not_comparable`, а не выдаётся как регрессия.
 
 Целевые значения agent quality не назначаются заранее: сначала фиксируется baseline
 первого полного прогона, затем `--fail-under` и release gates обсуждаются отдельно.
@@ -1618,8 +1901,9 @@ failed-тестов допустим; CI-гейт включается явны�
 | `eval/evaluators/dialogue.py` | новый | сценарные проверки |
 | `eval/evaluators/judge.py` | новый, опционально | LLM-судья |
 | `eval/report.py` | новый | HTML/Markdown/compare |
-| `eval/datasets/*.json` | новый | 30 эталонных тестов |
+| `eval/datasets/*.json` | новый | 30 эталонных тестов + `manifest.json` |
 | `eval/run_eval.py` | новый | alias для `spec_ui_eval.md` |
+| `eval/locks.py` | новый | `LLMExecutionLock` — общий с API lock |
 | `src/retrieval/hybrid_retriever.py` | изменение | опциональные stage lists в trace |
 | `src/retrieval/temporal_search.py` | изменение | проброс stage lists |
 | `src/retrieval/graph_hybrid.py` | изменение | проброс/добавление graph stage |

@@ -1,10 +1,28 @@
 # Спецификация UI и evaluation
 
-**Версия:** 1.0
-**Статус:** целевой контракт; UI и eval pipeline ещё не реализованы.
-**Связанные документы:** [spec_target.md](spec_target.md), [spec_agent.md](spec_agent.md), [spec_retrieval_engine.md](spec_retrieval_engine.md), [spec_graph.md](spec_graph.md)
+**Версия:** 1.1
+**Статус:** частично замещён. §1 (Streamlit UI) — историческая спецификация,
+заменённая [docs/specs/web-ui-modernization.md](docs/specs/web-ui-modernization.md).
+§2–§6 — исходный eval-контракт, уточнённый [spec_benchmark.md](spec_benchmark.md)
+и [docs/specs/evaluation-webui.md](docs/specs/evaluation-webui.md).
+**Связанные документы:** [spec_target.md](spec_target.md), [spec_agent.md](spec_agent.md),
+[spec_retrieval_engine.md](spec_retrieval_engine.md), [spec_graph.md](spec_graph.md),
+[spec_benchmark.md](spec_benchmark.md),
+[docs/specs/web-ui-modernization.md](docs/specs/web-ui-modernization.md),
+[docs/specs/evaluation-webui.md](docs/specs/evaluation-webui.md)
+
+> **Иерархия документов.** Этот документ больше не является источником истины для
+> интерфейса. Новый UI определяется `docs/specs/web-ui-modernization.md` (общий React
+> UI) и `docs/specs/evaluation-webui.md` (раздел Benchmark). Agent-level benchmark
+> определяется `spec_benchmark.md`. При расхождении приоритет у этих документов.
+> §1 сохраняется только как запись исходного Streamlit-контракта.
 
 ## 1. Streamlit UI
+
+> **Исторический раздел.** §1 описывает Streamlit UI, который заменяется React WebUI
+> по `docs/specs/web-ui-modernization.md`. Он не является источником истины для нового
+> интерфейса и не должен поддерживаться параллельно с ним. Для React UI действуют
+> `web-ui-modernization.md` и `docs/specs/evaluation-webui.md`.
 
 ### 1.1. Экран чата
 
@@ -52,6 +70,10 @@ API secrets. Кнопка очистки стирает состояние те�
 получает итоговый `AgentRunResult`, не отключая чат.
 
 ## 2. Evaluation dataset
+
+> **Заменено.** Формат `eval/dataset.jsonl` из этого раздела заменён suite-файлами
+> `eval/datasets/*.json` из `spec_benchmark.md` §3. JSONL остаётся только для
+> результатов (`cases.jsonl`). Раздел сохранён как история решения.
 
 Файл `eval/dataset.jsonl`, одна запись на строку:
 
