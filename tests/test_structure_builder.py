@@ -8,6 +8,8 @@ from src.core.models import RawElement
 from src.ingestion.structure_builder import (
     build_document_structure,
     infer_title_level,
+    is_junk_title,
+    parse_toc_entries,
 )
 
 
@@ -31,6 +33,95 @@ def test_infer_level_word_and_caps() -> None:
     assert infer_title_level("СТРАТЕГИЧЕСКИЙ ОТЧЕТ") == 0
     assert infer_title_level("Сообщение Председателя Правления") is None
     assert infer_title_level("") is None
+
+
+def test_junk_filters_infographic_and_cover() -> None:
+    """GRI-метки, обложка «2) ...», строка-предложение — не разделы."""
+    assert is_junk_title("GRI 2-1, 2-3")
+    assert is_junk_title("2) БПС-СБЕРБАНК")
+    assert is_junk_title("Кроме того, содержание Отчета соответствует:")
+    assert not is_junk_title("Обзор рынка")
+
+
+def test_toc_header_variants_and_html_rows() -> None:
+    """«Оглавление» (2016/2017/2018) и HTML-таблица TOC дают записи."""
+    elements = [
+        element("Оглавление", page=1),
+        RawElement(element_id="sber_2016:1", doc_id="sber_2016",
+                   type="Table", page=1, text="",
+                   html=("<table><tr><td>Портрет Группы</td><td>4</td></tr>"
+                         "<tr><td>Стратегический отчет</td><td>22</td></tr>"
+                         "</table>")),
+    ]
+    entries = parse_toc_entries(elements)
+    assert [(entry.name, entry.page) for entry in entries] == [
+        ("Портрет Группы", 4), ("Стратегический отчет", 22)]
+
+
+def test_toc_combines_split_name_across_cells() -> None:
+    """«Обращение ...» | «Правления .... 23» → одно имя + страница (2016)."""
+    elements = [
+        element("Содержание", page=1),
+        RawElement(element_id="sber_2016:1", doc_id="sber_2016",
+                   type="Table", page=1, text="",
+                   html=("<table><tr><td>Обращение Президента, Председателя</td>"
+                         "<td>Правления .... 23</td></tr></table>")),
+    ]
+    entries = parse_toc_entries(elements)
+    assert [(e.name, e.page) for e in entries] == [
+        ("Обращение Президента, Председателя Правления", 23)]
+
+
+def test_toc_does_not_capture_body_pages() -> None:
+    """Окно TOC — заголовок + 1 страница; тело документа не должно попадать."""
+    elements = [
+        element("Содержание", page=1),
+        element("Достижения", page=5),
+    ]
+    assert parse_toc_entries(elements) == []
+
+
+def test_toc_pages_resolved_from_body_titles() -> None:
+    """2017: TOC без страниц сопоставляется с Title в теле по имени."""
+    names = ["Портрет Группы", "Стратегический отчет", "Обзор результатов",
+             "Корпоративное управление", "Финансовая результативность"]
+    rows = "".join(f"<tr><td>{name}</td></tr>" for name in names)
+    elements = [
+        element("Оглавление", page=1),
+        RawElement(element_id="sber_2017:toc", doc_id="sber_2017",
+                   type="Table", page=1, text="",
+                   html=f"<table>{rows}</table>"),
+        *[element(name, page=10 + index) for index, name in enumerate(names)],
+    ]
+    structure = build_document_structure(elements)
+    assert [(section.title, section.page_start)
+            for section in structure.sections] == [
+        (name, 10 + index) for index, name in enumerate(names)]
+
+
+def test_toc_pages_are_not_sections() -> None:
+    """Title на страницах оглавления не попадают в дерево разделов."""
+    elements = [
+        element("Содержание", page=1, type_="Header"),
+        element("Портрет Группы", page=1),
+        element("Стратегический отчет", page=6),
+    ]
+    structure = build_document_structure(elements)
+    assert [section.title for section in structure.sections] == ["Стратегический отчет"]
+
+
+def test_bbox_height_assigns_heading_levels() -> None:
+    """Без outline/TOC крупный/средний/мелкий блок дают уровни 0/1/2."""
+    def sized(text: str, height: float) -> RawElement:
+        return RawElement(element_id=f"sber_2022:{text}", doc_id="sber_2022",
+                          type="Title", text=text, page=10,
+                          bbox=[0.0, 0.0, 1000.0, height],
+                          page_width=1000, page_height=1000)
+
+    elements = [sized("Часть первая", 300), sized("Глава вторая", 150),
+                sized("Раздел третий", 50)]
+    structure = build_document_structure(elements)
+    assert [section.level for section in structure.sections] == [0, 1, 2]
 
 
 def test_build_tree_breadcrumbs_and_parent() -> None:
@@ -205,6 +296,7 @@ def test_junk_titles_filtered() -> None:
     assert is_junk_title("1. ПРОКОПОВИЧ ПетР ПетРОВИЧ")
     assert is_junk_title("2. МАтЮШеВСКИй ВАСИлИй СтАНИСлАВОВИЧ")
     assert is_junk_title("Перейти")
+    assert is_junk_title("Содержание")     # страница TOC — не раздел
     assert is_junk_title("")
     assert is_junk_title(">5,7%")
     assert is_junk_title("~800 млрд руб.")
@@ -217,3 +309,74 @@ def test_junk_titles_filtered() -> None:
     assert is_junk_title("Y")
     assert not is_junk_title("1. Управление рисками")
     assert not is_junk_title("Миссия и ценности")
+
+
+def test_best_toc_level_fuzzy_substring() -> None:
+    """Межколоночная склейка TOC («Кредитные рейтинги Обзор рынка») матчится подстрокой."""
+    from src.ingestion.structure_builder import (_best_toc_level,
+                                                normalize_section_name)
+
+    toc_norm = [(normalize_section_name("Кредитные рейтинги Обзор рынка"), 0)]
+    assert _best_toc_level("Обзор рынка", toc_norm) == 0
+    assert _best_toc_level("Кредитные рейтинги Обзор рынка", toc_norm) == 0
+    # Обратное вложение: Title длиннее TOC-имени
+    assert _best_toc_level("Сбер сегодня и стратегия 2026", [("сбер сегодня", 0)]) == 0
+
+
+def test_best_toc_level_short_names_guarded() -> None:
+    """Короткие имена (<8 символов) не матчатся — иначе тянут случайные хвосты."""
+    from src.ingestion.structure_builder import _best_toc_level
+
+    assert _best_toc_level("ROE", [("roe и достаточность капитала", 1)]) is None
+    assert _best_toc_level("Итоги", [("ключевые итоги года", 0)]) is None
+
+
+def test_build_from_elements_file_and_save_sections(tmp_path) -> None:
+    """Артефакт elements.json → DocumentStructure → sections.json (roundtrip)."""
+    import json
+
+    from src.ingestion.structure_builder import (
+        build_from_elements_file,
+        load_sections,
+        save_sections,
+    )
+
+    elements = [
+        element("1. Управление рисками", page=10),
+        element("1.1 Кредитный риск", page=12),
+        element("Перейти", page=12),          # junk — не должен попасть в дерево
+        element("2. Технологии", page=20),
+    ]
+    elements_json = tmp_path / "sber_2023_elements.json"
+    elements_json.write_text(
+        json.dumps([e.to_dict() for e in elements], ensure_ascii=False),
+        encoding="utf-8")
+
+    structure = build_from_elements_file(elements_json)
+    assert structure.doc_id == "sber_2023"
+    assert [s.title for s in structure.sections] == [
+        "1. Управление рисками", "1.1 Кредитный риск", "2. Технологии"]
+
+    target = save_sections(structure, tmp_path / "structure")
+    saved = json.loads(target.read_text(encoding="utf-8"))
+    assert saved["doc_id"] == structure.doc_id
+    assert len(saved["sections"]) == len(structure.sections)
+    assert saved["sections"][1]["breadcrumbs"] == [
+        "1. Управление рисками", "1.1 Кредитный риск"]
+
+    # Обратное чтение артефакта даёт эквивалентное дерево
+    restored = load_sections(target)
+    assert restored.doc_id == structure.doc_id
+    assert [s.title for s in restored.sections] == [
+        s.title for s in structure.sections]
+    assert restored.sections[1].parent_id == structure.sections[1].parent_id
+
+
+def test_build_from_elements_file_missing_raises(tmp_path) -> None:
+    """Нет артефакта — FileNotFoundError (CLI не должен молча глотать)."""
+    import pytest
+
+    from src.ingestion.structure_builder import build_from_elements_file
+
+    with pytest.raises(FileNotFoundError):
+        build_from_elements_file(tmp_path / "nope_elements.json")

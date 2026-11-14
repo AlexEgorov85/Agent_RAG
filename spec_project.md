@@ -1,6 +1,13 @@
 # Спецификация проекта: Sberbank Annual Reports Graph RAG (2015–2024)
 ## Версия 3.1 — Structure-Aware + переиспользование всех 8 занятий курса
 
+> **Статус документа:** подробный исторический дизайн и учебный контекст. Текущий
+> проверяемый статус, границы MVP и критерии реализации фиксируются в
+> [`spec_target.md`](spec_target.md); отсутствующие компоненты детализированы в
+> `spec_agent.md`, `spec_retrieval_engine.md`, `spec_graph.md`, `spec_ui_eval.md`. Если описания
+> расходятся, приоритет у этих целевых спецификаций. Наличие раздела здесь не означает,
+> что соответствующий код уже реализован.
+
 > Изменение v3.0 → v3.1: проведён аудит **всех 8 занятий** курса. Матрица переиспользования
 > (§3) переписана под реальный код: hybrid search + RRF + LLM-реранкер берём из Занятия 5,
 > агентный цикл и query-analyzer — из Занятий 6–7, метрики и LLM-судья — из Занятия 8.
@@ -52,10 +59,9 @@
 |---|---|---|---|
 | **Парсинг PDF + структура** | `unstructured[all-docs]` | Layout-aware извлечение + `category_depth` для заголовков | Курс Занятие 2 + своё (структура) |
 | **Чанкинг** | `langchain-text-splitters.RecursiveCharacterTextSplitter` | 800/100, таблица = 1 чанк | Курс Занятие 2, as-is |
-| **RAG-фреймворк** | `llama-index` | Только граф: PropertyGraphIndex | Своё (курс — LangChain/LangGraph без графа) |
-| **Agent-фреймворк** | `langchain` + `langgraph` | Оркестрация retrieval-эджей, агентный цикл, память диалога | Курс Занятия 4, 6, 7 |
-| **Graph Store** | `networkx` | Хранение графа с DocumentNode | Своё |
-| **Vector Store** | in-memory NumPy (`DenseIndex` курса) | Эмбеддинги чанков | Курс Занятие 3 |
+| **Agent / RAG engine** | LangGraph `ReportAgent` + собственный `RAGEngine` | Агент оркестрирует allowlisted tools; engine отдельно тестируется | К7 + К+С |
+| **Graph Store** | `networkx.MultiDiGraph` | Один graph store для структуры, chunks и сущностей | Своё |
+| **Vector Store** | in-memory NumPy (`DenseIndex` курса) | Эмбеддинги чанков; persistent DB — только при измеренной необходимости | Курс Занятие 3 |
 | **Keyword Index** | `rank-bm25` + `pymorphy3` | BM25 с лемматизацией | Курс Занятие 5, as-is |
 | **Embeddings** | `ai-sage/Giga-Embeddings-instruct-3B` через Cloud.ru | query_prefix-протокол | Курс Занятие 3, as-is |
 | **Reranker** | LLM `ai-sage/GigaChat3-10B-A1.8B`, scores 0–3 | Pointwise-реранкинг пула после RRF | Курс Занятие 5, as-is |
@@ -131,7 +137,7 @@
 
 | Компонент | Источник | Что делаем |
 |---|---|---|
-| PropertyGraphIndex, KG-экстрактор, DocumentNode, community detection | **С** | НОВОЕ: в курсе графа знаний нет вообще (LlamaIndex тоже не используется) |
+| NetworkX-граф: Document/Section/Chunk/Entity, extractor, graph retrieval | **С** | НОВОЕ: в курсе графа знаний нет; без дублирующего LlamaIndex store |
 | Связи Entity/DocumentNode/Chunk | **С** | НОВОЕ |
 
 ### 3.5. Eval
@@ -191,7 +197,7 @@
 │  │  ├─ structure_filter() → С (eligible-предикат в протоколе К5)│ │
 │  │  ├─ rerank()         ← К5 LLM-реранкер as-is             │  │
 │  │  ├─ pack_context()   ← К4 as-is                          │  │
-│  │  ├─ graph_retrieve() → С (LlamaIndex PropertyGraphIndex) │  │
+│  │  ├─ graph_retrieve() → С (networkx.MultiDiGraph)        │  │
 │  │  └─ answer()         ← К4 SYSTEM_PROMPT + С промпты      │  │
 │  └──────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
@@ -353,7 +359,7 @@ PDF файлы (9 отчётов)
 [6. Валидация корпуса]  ← К2 assert-блок as-is → tests/test_corpus.py
         │
         ▼
-[7. LlamaIndex PropertyGraphIndex]  ← С ──→ Knowledge Graph
+[7. Graph Builder (networkx)]  ← С ──→ Knowledge Graph
         ├─→ KG Extractor (LLM) ──→ Entities + Relations
         ├─→ DocumentNode ──→ узлы структуры (разделы)
         └─→ Vector Index ──→ Эмбеддинги (Giga-Embeddings, К3)
@@ -402,7 +408,7 @@ User Query
     ▼
 [7. Temporal Filter]  ← К3 filter_chunks(year=…) + С: явное «2021 нет в данных»
     ▼
-[8. Graph Retrieve (опция)]  ← С: обход PropertyGraphIndex по сущностям
+[8. Graph Retrieve (опция)]  ← С: ограниченный обход networkx по сущностям
     ▼
 [9. pack_context(max_chars)]  ← К4 as-is (таблицы не режутся)
     ▼
@@ -468,7 +474,7 @@ sberbank_graph_rag/
 │   ├── rewrite.py           # К5  query rewriting (2 перефраза + RRF по формулировкам)
 │   ├── structure_filter.py  # С   structure_eligible — предикат в eligible-протоколе К5
 │   ├── query_router.py      # С↑К7 Pydantic RoutingDecision + structured output json_mode
-│   ├── graph_retriever.py   # С   обход PropertyGraphIndex
+│   ├── graph_retriever.py   # С   ограниченный обход networkx (см. целевую спеку)
 │   └── hybrid_retriever.py  # С↑К5 конвейер eligible → BM25+dense(20) → RRF → rerank(10) → top(5)
 │
 ├── src/engine/
@@ -549,10 +555,12 @@ sberbank_graph_rag/
 | Шаг | Задача | Источник кода | Результат |
 |---|---|---|---|
 | **1** | Адаптируем курсовой клиент (К1: env-креды, OpenAI-клиент) в `src/core/`. Переносим парсинг per-page (К2) — `pdf_parser.py` доведён до v1.1: **fix §3.1 внедрён (задачи 7.1–7.4 done)** — батчи через pypdf-slice (`build_page_slice`) + `starting_page_number` + `extract_image_block_to_payload=True`; бенчмарк снят: hi_res steady 8.3 с/стр. → ≈ 5.9 ч на 2581 стр. | К1, К2 | `src/core/credentials.py`, `pdf_parser.py` v1.1 |
-| **2** | Строим `DocumentStructure`. `structure_builder.py` v1 готов: уровни заголовков по эвристике (нумерация «1./1.1/1.1.1», ГЛАВА/caps, фолбэк-наследие) + TOC-калибровка (`parse_toc_entries`, жадный скан слитных Table/Image «Содержания», уровень по нумерации имени) + junk-фильтры (ФИО списки советов, инфографика «>5,7%», дедуп подряд). Проверено на малых срезах 2023 (стр. 9–13 TOC; стр. 23–32 части) и на 2015 hi_res. Дальше: fuzzy-match TOC↔Title (межколоночные склейки), артефакт `_sections.json`, breadcrumbs в чанках | Свой + К2 | Дерево разделов + HierarchicalChunk || **3** | Таблицы → FinancialFact (LLM). Картинки → chart_description (VLM). | Свой (+ промпт-паттерн К1) | Структурированные данные |
+| **2** | Строим `DocumentStructure`. `structure_builder.py` готов: уровни по эвристике + TOC-калибровка (точный + fuzzy-матч) + junk-фильтры. Артефакт `data/structure/{doc_id}_sections.json`, CLI `--structure`. Проверено малыми срезами 2023 и на 2015. | Свой + К2 | Дерево разделов |
+| **2.5** | Чанкинг К2 + breadcrumbs: `pdf_to_chunks.py` (800/100, таблица = 1 чанк, chunk_id/evidence_id), `chunk_enricher.py` (section_path/breadcrumbs/section_level/parent_section), CLI `--chunks`, `data/chunks/{doc_id}_chunks.json` | К2 + С | HierarchicalChunk |
+| **3** | Таблицы → FinancialFact (LLM). Картинки → chart_description (VLM). | Свой (+ промпт-паттерн К1) | Структурированные данные |
 | **4** | Масштабируем на все 9 отчётов. Кэш векторов с `corpus_fingerprint` (К3) на Giga-Embeddings | К3 | Полный набор чанков 2015–2024, кэш |
-| **5** | Строим граф через LlamaIndex PropertyGraphIndex с DocumentNode. MVP: 3 отчёта | Свой (LlamaIndex) | Knowledge Graph |
-| **6** | Собираем hybrid retrieval: К5 (BM25, rrf, rerank, rewriting) as-is + structure_filter в eligible-протокол + Query Router (К7-механика). `GraphRAGEngine` — наследник К4 `RAGEngine` с graph_retrieve | К5, К7, К4 + свой | Работающий retrieval |
+| **5** | Строим граф `networkx.MultiDiGraph`: Document/Section/Chunk/Entity + provenance; scope фиксируется manifest | Своё | Проверяемый graph index |
+| **6** | Собираем hybrid retrieval: BM25 + dense → structure/metadata eligibility → RRF → rerank → citations/abstain; graph — дополнительный retriever | К5/К7-паттерны + своё | Работающий retrieval |
 | **7** | Streamlit UI: чат (К7-агентный цикл + streaming) + граф + дерево структуры + timeline | К7 поверх + свой | Интерактивный прототип |
 | **8** | Eval: dev-вопросы (формат К3, переадресованные) + свои; метрики К8 `ranking_metrics` + mean-агрегация (своё); LLM-judge К8 + калибровка; скринкаст | К8 + свой | Готовый проект |
 
@@ -622,11 +630,12 @@ sberbank_graph_rag/
 
 ## 15. Следующий шаг
 
-Возвращаемся на **Шаг 1–2 плана**:
-1. `src/core/credentials.py` (К1 env-версия) + `src/core/config.py` (ProjectConfig К3/К4 + наши поля breadcrumbs/структура)
-2. Перенос К2-чанкинга в `src/ingestion/pdf_to_chunks.py` на нашем реестре 9 PDF (sha256-контроль)
-3. `structure_builder.py` — пробный прогон на `Копия Сбер 2023.pdf`: сколько `Title` с `category_depth`, проверка глазами дерева
-4. Сверка с `spec_pdf_parser.md` v1.1 (fix батчей §3.1 — вырезка страниц через pypdf, т.к. `pages=` игнорируется unstructured 0.27.36)
+Кодовый задел включает parser v2, outline, structure и chunking. Полный корпус не
+подтверждён артефактами; retrieval, graph, engine, UI и eval ещё предстоит реализовать.
+Актуальные этапы и критерии — в `spec_target.md`. Ближайшая последовательность:
 
-
-
+1. Проверить реестр источников и включить issuer/country в metadata (особенно `sber_2015`).
+2. Прогнать corpus pipeline, вручную проверить артефакты и добавить корпусные валидаторы.
+3. Реализовать dense/BM25 baseline и engine с citations/abstain, измерить на dev set.
+4. Добавить structure-aware retrieval, reranking, graph retriever, UI и evaluation по
+   профильным спецификациям; не заявлять метрики до фактического прогона.
