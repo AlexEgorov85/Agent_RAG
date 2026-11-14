@@ -30,13 +30,11 @@
 | Стратегия | `hi_res` (layout-aware, работает на нашей машине — проверено `scripts/test_hi_res.py`) |
 | Рельеф данных (факт, pypdf) | 2015=74, 2016=310, 2017=198, 2018=213, 2019=300, 2020=323, 2022=275, 2023=402, 2024=486 стр.; всего 2581; 2021 отсутствует — валидная ситуация |
 
-> **Проверка данных (решено):** smoke 2015 показывает «ОАО «БПС-СБЕРБАНК» ГОДОВОЙ
-> ОТЧЕТ ЗА 2015» — это отчет **БПС-Сбербанка** (белорусская дочка), а не ПАО Сбербанк.
-> Решение владельца проекта: документ **включается в корпус целиком** как
-> обычный отчёт (поэтому doc_id `sber_2015` и подход к нему не отличаются от
-> остальных 8). Нюанс следует держать в голове на структурном слое
-> (`structure_builder.py`): заголовок «БПС-СБЕРБАНК» — валидный Title документа,
-> и «дочка»-контекст документа не теряется при сборке DataType/разделов.
+> **Проверка данных:** smoke 2015 показывает «ОАО «БПС-СБЕРБАНК» ГОДОВОЙ ОТЧЕТ
+> ЗА 2015» — это отчёт **БПС-Сбербанка** (белорусская дочка), а не ПАО Сбербанк.
+> Файл можно парсить и хранить в корпусе, но downstream metadata обязаны указывать
+> `issuer` и `country`. Его нельзя по умолчанию смешивать с рядом российских отчётов
+> во временных сравнениях. См. `spec_target.md` §3.
 
 ---
 
@@ -61,6 +59,12 @@ class RawElement:
     html: Optional[str]    # Table → metadata.text_as_html; для прочих None
     image_b64: Optional[str]  # Image → data-url; для прочих None
     area_px: Optional[int] # Image → w*h (для фильтра мелких картинок перед VLM)
+    # --- схема v2: геометрия и служебные сигналы layout-модели ---
+    bbox: Optional[List[float]]      # [x0, y0, x1, y1] в координатах Unstructured
+    page_width: Optional[int]        # layout_width страницы (например, 4686)
+    page_height: Optional[int]       # layout_height страницы (например, 2619)
+    detection_class_prob: Optional[float]  # уверенность layout-модели (0..1)
+    image_path: Optional[str]        # вырез figure-*.jpg относительно корня проекта
 ```
 
 **Правила нормализации (реализованные):**
@@ -71,11 +75,23 @@ class RawElement:
 - `element_id` стабилен: индекс = порядковый номер в файле парсинга этого PDF
   (все элементы одного файла разбираются за один проход; сквозной индекс через батчи).
 - `image_b64` храним только если `area_px >= 200*200` (фильтр мелких значков).
-  `area_px` вычисляется по `coordinates` или fallback'ом через PIL.
-- **Fill-up протокол картинок (fix v1.1):** в `_parse_batch` обязан быть
-  `extract_image_block_to_payload=True` — только тогда `metadata.image_base64`
-  заполняется. Дополнительно Unstructured сохраняет jpg-вырезы в
-  `data/figures/{doc_id}/` (побочный артефакт вне контракта).
+  `area_px` вычисляется по `coordinates.points`/bbox, fallback — через PIL.
+- **Payload картинок (схема v2):** `extract_image_block_to_payload` управляется
+  настройкой `store_image_payload` (по умолчанию `True`). Для полного корпуса
+  рекомендуется `False`: base64 раздувает JSON (до ~1 МБ на дизайнерскую
+  страницу), а jpg-вырезы всё равно пишутся в `data/figures/{doc_id}/`, и в
+  элементе остаётся `image_path`. VLM читает файл по `image_path`.
+- **Геометрия (схема v2):** `bbox`/`page_width`/`page_height` берутся из
+  `metadata.coordinates` (`coordinates.points` + `coordinates.to_dict()` /
+  `system.layout_*`). Это позволяет downstream-этапам использовать высоту
+  блока как сигнал уровня заголовка и фильтровать caps-джанк инфографики без
+  повторного парсинга.
+- **Версия схемы:** `PARSE_SCHEMA_VERSION = 2`; подпись парсинга
+  (`parse_signature`: schema_version, strategy, ocr_languages, min_image_area,
+  store_image_payload, infer_table_structure) пишется в `_stats.json`.
+  Resume пропускает файл только при совпадении `source_sha256` **и** подписи;
+  `--force` перепарсивает принудительно, старые артефакты уходят в
+  `data/elements/backup/`.
 
 ### 2.2. doc_id и год
 
@@ -269,8 +285,10 @@ data/
 - Дублирующий каталог `metadata/` из v1.0 отменён — не реализован и не нужен.
 - Файловый контракт: `structure_builder.py` читает ТОЛЬКО `_elements.json`
   (не модули Unstructured) — нижний слой заменяем на «один API».
-- Потребители картинок (`visual_describer.py`) читают `image_b64` из JSON
-  (не дисковые вырезы).
+- Потребители картинок (`visual_describer.py`) предпочитают `image_path` на
+  сохранённый вырез; `image_b64` поддерживается для артефактов, созданных с
+  `store_image_payload=True`. При отключённом payload картинка не должна молча
+  считаться обработанной — записывается причина пропуска/ошибка чтения файла.
 
 ---
 
@@ -336,7 +354,7 @@ python -m src.ingestion --all --batch 10
 | `structure_builder.py` | `RawElement(type="Title")` → дерево из `category_depth`, page ranges разделов |
 | `chunk_enricher.py` | Все `RawElement`: `element_id` → `chunk.element_ids`, `source_sha256`, `page_label`, страницу из `page` |
 | `table_structurer.py` | `RawElement(type="Table")` → поле `html` (text_as_html) + `page` |
-| `visual_describer.py` | `RawElement(type="Image")` → `image_b64`, `page`, `area_px` (payload=True обязателен, §3.1) |
+| `visual_describer.py` | `RawElement(type="Image")` → `image_path` или `image_b64`, `page`, `area_px`; payload не обязателен (§2.1) |
 | `graph/` (DocumentNode) | Page ranges разделов из `structure_builder` |
 | eval | `stats.n_elements`, `stats.by_type` — для отчётов о составе корпуса |
 
@@ -374,5 +392,3 @@ python -m src.ingestion --all --batch 10
 OpenSpec change `add-pdf-parser`: задачи 1–5 фактически выполнены
 (задача 5.2 — замена пакета из `requirements.txt`); критический fix §3.1 внедрён
 (7.1–7.4, см. `tasks.md` §7); оставшиеся — полный прогон корпуса (6.1) и 2023-ревью.
-
-

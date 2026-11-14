@@ -12,6 +12,7 @@ unstructured-inference>=1.6         # нужен для hi_res (не входи�
 
 # --- Agent-фреймворк (курс, Занятия 4/6/7) ---
 langchain>=1.4                       # цепочки, prompt-шаблоны, @tool, create_agent
+langchain-text-splitters>=1.1        # RecursiveCharacterTextSplitter (чанкинг К2, 800/100)
 langchain-openai>=1.7                # GigaChat через OpenAI-совместимый endpoint
 langgraph>=1.0                       # StateGraph, агентный цикл, InMemorySaver
 

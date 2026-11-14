@@ -18,6 +18,9 @@ def parser_env(tmp_path: Path) -> ParserSettings:
         parse_page_batch=2,
         data_raw_dir=tmp_path / "raw",
         data_elements_dir=tmp_path / "elements",
+        data_structure_dir=tmp_path / "structure",
+        data_chunks_dir=tmp_path / "chunks",
+        data_samples_dir=tmp_path / "samples",
         ocr_languages=("eng",),
     )
 
@@ -138,3 +141,113 @@ def test_cli_no_mode_prints_help(capsys):
 def test_cli_modes_mutually_exclusive():
     with pytest.raises(SystemExit):
         build_arg_parser().parse_args(["--all", "--stats"])
+
+
+def test_cli_sample_mode_writes_samples(parser_env, pdf_file, patch_partition,
+                                        capsys) -> None:
+    """`--sample`: выборка страниц в data_samples_dir, канонические артефакты не трогаются."""
+    code = main(["--sample"], settings=parser_env)
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "[sample]" in out and "сводка" in out
+    assert (parser_env.data_samples_dir / "sber_2099_elements.json").is_file()
+    assert (parser_env.data_samples_dir / "sample_summary.json").is_file()
+    assert list(parser_env.data_elements_dir.glob("*")) == []
+
+
+def test_cli_structure_mode_builds_sections(parser_env, capsys) -> None:
+    """`--structure`: *_elements.json → *_sections.json в data_structure_dir."""
+    import json
+
+    from src.core.models import RawElement
+
+    parser_env.data_elements_dir.mkdir(parents=True, exist_ok=True)
+    elements = [
+        RawElement(element_id="sber_2023:00000", doc_id="sber_2023",
+                   type="Title", text="1. Управление рисками", page=10),
+        RawElement(element_id="sber_2023:00001", doc_id="sber_2023",
+                   type="Title", text="1.1 Кредитный риск", page=12),
+    ]
+    (parser_env.data_elements_dir / "sber_2023_elements.json").write_text(
+        json.dumps([e.to_dict() for e in elements], ensure_ascii=False),
+        encoding="utf-8")
+
+    code = main(["--structure"], settings=parser_env)
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "sber_2023" in out and "разделов 2" in out
+    assert (parser_env.data_structure_dir / "sber_2023_sections.json").is_file()
+
+
+def test_cli_structure_mode_uses_pdf_outline(parser_env, capsys) -> None:
+    """`--structure` читает закладки PDF, сохраняет артефакт и берёт их уровни."""
+    import json
+
+    from pypdf import PdfWriter
+
+    from src.core.models import RawElement
+
+    parser_env.data_raw_dir.mkdir(parents=True, exist_ok=True)
+    writer = PdfWriter()
+    for _ in range(3):
+        writer.add_blank_page(width=595, height=842)
+    parent = writer.add_outline_item("1. Управление рисками", 0)
+    writer.add_outline_item("Кредитный риск", 1, parent=parent)
+    pdf_path = parser_env.data_raw_dir / "Копия Сбер 2023.pdf"
+    with open(pdf_path, "wb") as fh:
+        writer.write(fh)
+
+    parser_env.data_elements_dir.mkdir(parents=True, exist_ok=True)
+    elements = [
+        RawElement(element_id="sber_2023:00000", doc_id="sber_2023",
+                   type="Title", text="1. Управление рисками", page=1),
+        RawElement(element_id="sber_2023:00001", doc_id="sber_2023",
+                   type="Title", text="Кредитный риск", page=2),
+    ]
+    (parser_env.data_elements_dir / "sber_2023_elements.json").write_text(
+        json.dumps([e.to_dict() for e in elements], ensure_ascii=False),
+        encoding="utf-8")
+
+    code = main(["--structure"], settings=parser_env)
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "уровни из outline" in out
+    assert (parser_env.data_structure_dir / "sber_2023_outline.json").is_file()
+
+    saved = json.loads((parser_env.data_structure_dir
+                        / "sber_2023_sections.json").read_text(encoding="utf-8"))
+    assert [s["level"] for s in saved["sections"]] == [0, 1]
+
+
+def test_cli_structure_mode_no_artifacts(parser_env, capsys) -> None:
+    """`--structure` без артефактов — код 1 и понятное сообщение."""
+    code = main(["--structure"], settings=parser_env)
+    assert code == 1
+    assert "нет артефактов" in capsys.readouterr().out
+
+
+def test_cli_chunks_mode_builds_enriched_chunks(parser_env, capsys) -> None:
+    """`--chunks`: элементы → чанки К2 с breadcrumbs (структура строится на ходу)."""
+    import json
+
+    from src.core.models import RawElement
+
+    parser_env.data_elements_dir.mkdir(parents=True, exist_ok=True)
+    elements = [
+        RawElement(element_id="sber_2023:00000", doc_id="sber_2023",
+                   type="Title", text="1. Управление рисками", page=1),
+        RawElement(element_id="sber_2023:00001", doc_id="sber_2023",
+                   type="NarrativeText", text="Кредитный портфель вырос.", page=1),
+    ]
+    (parser_env.data_elements_dir / "sber_2023_elements.json").write_text(
+        json.dumps([e.to_dict() for e in elements], ensure_ascii=False),
+        encoding="utf-8")
+
+    code = main(["--chunks"], settings=parser_env)
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "sber_2023" in out and "с разделом" in out
+    target = parser_env.data_chunks_dir / "sber_2023_chunks.json"
+    chunks = json.loads(target.read_text(encoding="utf-8"))
+    assert chunks and chunks[0]["breadcrumbs"] == ["1. Управление рисками"]
+    assert chunks[0]["kind"] == "text"

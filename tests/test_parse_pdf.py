@@ -15,9 +15,12 @@ from src.ingestion.pdf_parser import (
     format_stats_table,
     is_already_parsed,
     load_stats,
+    pages_to_ranges,
     parse_all,
     parse_pdf,
+    parse_sample,
     save_artifacts,
+    select_sample_pages,
 )
 
 
@@ -37,7 +40,8 @@ def fake_element(cat: str, text: str, page: int, depth=None, html=None, b64=None
     )
 
 
-def fake_partition_factory(pages: int, fail_pages: set[int] | None = None):
+def fake_partition_factory(pages: int, fail_pages: set[int] | None = None,
+                           expected_payload: bool = True):
     """partition_pdf-подделка под протокол §3.1 spec_pdf_parser.md v1.1.
 
     Новый протокол: ``file=BytesIO`` (вырезка страниц pypdf) + ``starting_page_number``.
@@ -53,8 +57,8 @@ def fake_partition_factory(pages: int, fail_pages: set[int] | None = None):
         from pypdf import PdfReader
 
         assert infer_table_structure == (strategy == "hi_res")
-        # Контракт v1.1: base64 изображений кладётся в payload
-        assert extract_image_block_to_payload is True
+        # base64 кладётся в payload только если store_image_payload=True
+        assert extract_image_block_to_payload is expected_payload
         buffer_pages = len(PdfReader(file).pages)
         start = starting_page_number
         calls.append((start, buffer_pages))
@@ -79,6 +83,7 @@ def parser_env(tmp_path: Path) -> ParserSettings:
         parse_page_batch=2,
         data_raw_dir=tmp_path / "raw",
         data_elements_dir=tmp_path / "elements",
+        data_samples_dir=tmp_path / "samples",
         ocr_languages=("eng",),
     )
 
@@ -286,3 +291,126 @@ def test_format_stats_table(parser_env, three_page_pdf, monkeypatch):
     parse_pdf(three_page_pdf, settings=parser_env)
     table = format_stats_table(settings=parser_env)
     assert "sber_2099" in table and "6" in table
+
+
+def test_no_image_payload_setting(monkeypatch, parser_env, three_page_pdf):
+    """store_image_payload=False: payload выключен, подпись это фиксирует."""
+    fake = fake_partition_factory(3, expected_payload=False)
+    monkeypatch.setattr("unstructured.partition.pdf.partition_pdf", fake)
+    settings = parser_env.model_copy(update={"store_image_payload": False})
+    result = parse_pdf(three_page_pdf, settings=settings)
+    assert result is not None
+    signature = result.stats["parse_signature"]
+    assert signature["store_image_payload"] is False
+    assert signature["schema_version"] == 2
+
+
+def test_signature_change_reparses_with_backup(monkeypatch, parser_env,
+                                               three_page_pdf):
+    """Смена настроек парсинга делает артефакт неактуальным (не только sha256)."""
+    fake = fake_partition_factory(3)
+    monkeypatch.setattr("unstructured.partition.pdf.partition_pdf", fake)
+    parse_pdf(three_page_pdf, settings=parser_env)
+    assert is_already_parsed(three_page_pdf, parser_env.data_elements_dir,
+                             "sber_2099", settings=parser_env)
+
+    changed = parser_env.model_copy(update={"store_image_payload": False})
+    assert not is_already_parsed(three_page_pdf, parser_env.data_elements_dir,
+                                 "sber_2099", settings=changed)
+    result = parse_pdf(three_page_pdf, settings=changed)
+    assert result is not None
+    backup = parser_env.data_elements_dir / "backup"
+    assert backup.is_dir() and list(backup.glob("sber_2099_*"))
+    assert result.stats["parse_signature"]["store_image_payload"] is False
+
+
+def test_force_reparses_actual_artifact(monkeypatch, parser_env, three_page_pdf):
+    """--force перепарсивает даже актуальный артефакт и сохраняет старый в backup."""
+    fake = fake_partition_factory(3)
+    monkeypatch.setattr("unstructured.partition.pdf.partition_pdf", fake)
+    parse_pdf(three_page_pdf, settings=parser_env)
+    result = parse_pdf(three_page_pdf, settings=parser_env, force=True)
+    assert result is not None
+    backup = parser_env.data_elements_dir / "backup"
+    assert backup.is_dir() and list(backup.glob("sber_2099_*"))
+
+
+def test_backup_keeps_elements_and_stats_files(monkeypatch, parser_env,
+                                               three_page_pdf):
+    """Багфикс: _elements.json и _stats.json имеют один суффикс — не затирать."""
+    fake = fake_partition_factory(3)
+    monkeypatch.setattr("unstructured.partition.pdf.partition_pdf", fake)
+    parse_pdf(three_page_pdf, settings=parser_env)
+    parse_pdf(three_page_pdf, settings=parser_env, force=True)
+    names = [path.name for path in
+             (parser_env.data_elements_dir / "backup").glob("sber_2099_*")]
+    assert any("elements" in name for name in names), names
+    assert any("stats" in name for name in names), names
+
+
+def test_select_sample_pages_spans_toc_and_body():
+    pages = select_sample_pages(100, total_pages=10, toc_pages=6)
+    assert pages[:6] == [1, 2, 3, 4, 5, 6]
+    assert len(pages) == 10
+    assert pages == sorted(set(pages))
+    assert all(7 <= page <= 100 for page in pages[6:])
+    # Маленький документ: только TOC-страницы, без выхода за границы
+    assert select_sample_pages(4, total_pages=10, toc_pages=6) == [1, 2, 3, 4]
+
+
+def test_pages_to_ranges_groups_consecutive_pages():
+    assert pages_to_ranges([1, 2, 4, 5, 6, 9]) == [(1, 2), (4, 6), (9, 9)]
+    assert pages_to_ranges([]) == []
+
+
+def test_parse_sample_writes_only_to_samples_dir(monkeypatch, parser_env,
+                                                 three_page_pdf):
+    fake = fake_partition_factory(3)
+    monkeypatch.setattr("unstructured.partition.pdf.partition_pdf", fake)
+    result = parse_sample(three_page_pdf, settings=parser_env, pages=[1, 3])
+    assert result.stats["sample_pages"] == [1, 3]
+    assert result.stats["n_pages_sampled"] == 2
+    assert {el.page for el in result.elements} == {1, 3}
+    samples = parser_env.data_samples_dir
+    assert (samples / "sber_2099_elements.json").is_file()
+    assert (samples / "sber_2099_stats.json").is_file()
+    assert (samples / "figures" / "sber_2099").is_dir()
+    # Канонический data/elements не тронут
+    assert not (parser_env.data_elements_dir / "sber_2099_elements.json").exists()
+
+
+def test_image_element_keeps_bbox_path_and_prob(monkeypatch, parser_env,
+                                                three_page_pdf):
+    """Схема v2: bbox/page_size/prob/image_path доступны downstream-этапам."""
+    def partition_one_image(*, file, strategy, infer_table_structure,
+                            extract_image_block_types,
+                            extract_image_block_to_payload,
+                            starting_page_number, languages, **_ignored):
+        return [SimpleNamespace(
+            category="Image", text="график",
+            metadata=SimpleNamespace(
+                page_number=starting_page_number,
+                category_depth=None, text_as_html=None, image_base64=None,
+                detection_class_prob=0.875,
+                image_path="data/figures/sber_2099/figure-1-1.jpg",
+                coordinates=SimpleNamespace(
+                    page_number=starting_page_number,
+                    points=((10.0, 20.0), (10.0, 120.0),
+                            (210.0, 120.0), (210.0, 20.0)),
+                    layout_width=1000, layout_height=500,
+                    width=None, height=None),
+            ),
+        )]
+
+    monkeypatch.setattr("unstructured.partition.pdf.partition_pdf",
+                        partition_one_image)
+    settings = parser_env.model_copy(update={"store_image_payload": False})
+    result = parse_pdf(three_page_pdf, settings=settings)
+    assert result is not None
+    element = next(el for el in result.elements if el.type == "Image")
+    assert element.bbox == [10.0, 20.0, 210.0, 120.0]
+    assert element.page_width == 1000 and element.page_height == 500
+    assert element.detection_class_prob == 0.875
+    assert element.image_path == "data/figures/sber_2099/figure-1-1.jpg"
+    assert element.area_px == 20000
+    assert element.image_b64 is None
