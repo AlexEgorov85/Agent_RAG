@@ -33,7 +33,7 @@ ENTITY_RECORD_SOURCE = "llm_entity_extractor"
 
 #: Ограничивает текст, отправляемый провайдеру на один чанк.
 MAX_CHUNK_TEXT_CHARS = 4_000
-MAX_COMPLETION_TOKENS = 2_048
+MAX_COMPLETION_TOKENS = 4_096
 
 #: Визуальные описания не входят в MVP-контракт извлечения.
 _SKIPPED_CHUNK_KINDS = frozenset({"chart", "figure", "image", "visual"})

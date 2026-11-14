@@ -1,0 +1,88 @@
+[
+  {
+    "id": "profit_2023",
+    "question": "Какая чистая прибыль Группы за 2023 год?",
+    "relevant_chunk_ids": ["sber_2023:00078:c3:c5cc6e1f46e2"]
+  },
+  {
+    "id": "roe_2023",
+    "question": "Какой уровень рентабельности капитала (ROE) за 2023 год?",
+    "relevant_chunk_ids": [
+      "sber_2023:00078:c3:c5cc6e1f46e2",
+      "sber_2023:00136:c1:3335c25de148"
+    ]
+  },
+  {
+    "id": "key_rate_2023",
+    "question": "Что известно о ключевой ставке в 2023 году?",
+    "relevant_chunk_ids": ["sber_2023:00064:c1:51fc02863122"]
+  },
+  {
+    "id": "gigachat",
+    "question": "Что известно о GigaChat?",
+    "relevant_chunk_ids": [
+      "sber_2023:00078:c1:269f35dc44ac",
+      "sber_2023:00048:c1:fa358aad4f2d",
+      "sber_2023:00449:c1:d5b961bf8bb6"
+    ]
+  },
+  {
+    "id": "sberprime_2022",
+    "question": "Что говорится о подписке СберПрайм в 2022 году?",
+    "relevant_chunk_ids": ["sber_2022:00540:c0:76b795bd674e"]
+  },
+  {
+    "id": "sberbusiness_2022",
+    "question": "Что говорится о СберБизнес в 2022 году?",
+    "relevant_chunk_ids": [
+      "sber_2022:00127:c0:4edfa85d4f46",
+      "sber_2022:00774:c0:5e93d4050dfb"
+    ]
+  },
+  {
+    "id": "cet1_2023",
+    "question": "Какая достаточность базового капитала CET1 за 2023 год?",
+    "relevant_chunk_ids": ["sber_2023:00136:c1:3335c25de148"]
+  },
+  {
+    "id": "strategy_2026",
+    "question": "Что известно о Стратегии 2026?",
+    "relevant_chunk_ids": ["sber_2023:00585:c0:73c877d84551"]
+  },
+  {
+    "id": "nim_forecast",
+    "question": "Какой прогноз чистой процентной маржи на 2024 год?",
+    "relevant_chunk_ids": [
+      "sber_2023:00683:c0:d585ccfa7d8d",
+      "sber_2023:00524:c0:d8c805e18e7f"
+    ]
+  },
+  {
+    "id": "credit_portfolio_2017",
+    "question": "Как изменился кредитный портфель Группы в 2017 году?",
+    "relevant_chunk_ids": ["sber_2017:00193:c1:35f0d643c79c"]
+  },
+  {
+    "id": "mortgage_2016",
+    "question": "Что говорится об ипотечном кредитовании в 2016 году?",
+    "relevant_chunk_ids": ["sber_2016:00594:c0:0faf32845477"]
+  },
+  {
+    "id": "active_clients_2017",
+    "question": "Сколько активных клиентов было у Сбербанка в 2017 году?",
+    "relevant_chunk_ids": [
+      "sber_2017:00055:c4:7d9464770c8f",
+      "sber_2017:00617:c3:3f69b5b83ac2"
+    ]
+  },
+  {
+    "id": "dividend_policy_2017",
+    "question": "Что изменилось в дивидендной политике Сбербанка в 2017 году?",
+    "relevant_chunk_ids": ["sber_2017:00342:c1:ef177943f37f"]
+  },
+  {
+    "id": "esg_risks_2023",
+    "question": "Как банк управляет ESG-рисками?",
+    "relevant_chunk_ids": ["sber_2023:00495:c0:bc41e332f7fa"]
+  }
+]

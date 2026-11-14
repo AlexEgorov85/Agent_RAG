@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -59,13 +60,22 @@ def _edit_distance(left: str, right: str) -> int:
 
 
 def _resolve_candidate_id(chunk_id: str, candidate_ids: Sequence[str]) -> str:
-    """Принимает точный ID или однозначную опечатку в один символ."""
+    """Принимает точный ID, опечатку в один символ или однозначный near-match."""
     if chunk_id in candidate_ids:
         return chunk_id
     matches = [candidate for candidate in candidate_ids
                if _edit_distance(chunk_id, candidate) <= 1]
     if len(matches) == 1:
         return matches[0]
+    # GigaChat иногда теряет цифры в doc_id (``sber_16`` вместо ``sber_2016``).
+    # Принимаем только однозначное сходство, чтобы не приписать оценку чужому
+    # чанку с тем же префиксом.
+    close = [
+        candidate for candidate in candidate_ids
+        if difflib.SequenceMatcher(None, chunk_id, candidate).ratio() >= 0.95
+    ]
+    if len(close) == 1:
+        return close[0]
     raise ValueError(f"reranker returned unexpected chunk_id: {chunk_id}")
 
 

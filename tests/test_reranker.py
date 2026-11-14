@@ -6,6 +6,8 @@ import json
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 from src.retrieval.reranker import LLMReranker
 
 
@@ -233,3 +235,23 @@ def test_lenient_mode_still_rejects_injected_ids() -> None:
     result = reranker.rerank("query", _hits())
 
     assert result.used_fallback is True
+
+
+def test_candidate_id_accepts_a_single_clear_typo() -> None:
+    from src.retrieval.reranker import _resolve_candidate_id
+
+    candidate = "sber_2016:00594:c1:fd5e113af6c9"
+    assert _resolve_candidate_id("sber_16:00594:c1:fd5e113af6c9", [candidate]) == candidate
+    assert _resolve_candidate_id(
+        "sber_2016:00594:c1:fd5e113af6c9", [candidate]) == candidate
+
+
+def test_candidate_id_rejects_ambiguous_or_foreign_ids() -> None:
+    from src.retrieval.reranker import _resolve_candidate_id
+
+    candidates = [
+        "sber_2016:00594:c1:fd5e113af6c9",
+        "sber_2016:00594:c1:fd5e113af6ca",
+    ]
+    with pytest.raises(ValueError):
+        _resolve_candidate_id("injected", candidates)

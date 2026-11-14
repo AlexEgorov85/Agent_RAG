@@ -48,7 +48,7 @@ def build_configs() -> list[SelectionConfig]:
         ("tok16000", 1_000_000_000, 16_000),
         ("tok28672", 1_000_000_000, 28_672),
     ]
-    for threshold in (0, 2, 3):
+    for threshold in (0, 1, 2, 3):
         for name, max_chars, max_tokens in budgets:
             configs.append(SelectionConfig(
                 name=f"t{threshold}_{name}",
@@ -141,6 +141,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="Размеры пула кандидатов через запятую")
     parser.add_argument("--limit", type=int, default=None,
                         help="Ограничить число вопросов для быстрой проверки")
+    parser.add_argument("--include-relation-evidence", action="store_true",
+                        help="Добавлять evidence соседних сущностей по RELATED_TO")
     args = parser.parse_args(argv)
 
     api_key = os.getenv("LLM_API_KEY")
@@ -201,17 +203,30 @@ def main(argv: list[str] | None = None) -> int:
         client,
         os.getenv("RERANKER_MODEL", "ai-sage/GigaChat3-10B-A1.8B"),
         allow_missing_scores=True,
+        max_candidates=max(pools),
     )
     chunk_store = {
         str(chunk["chunk_id"]): chunk
         for chunk in chunks
         if isinstance(chunk.get("chunk_id"), str) and chunk["chunk_id"]
     }
+    missing_gold = sorted({
+        chunk_id
+        for item in questions
+        for chunk_id in item["relevant_chunk_ids"]
+        if chunk_id not in chunk_store
+    })
+    if missing_gold:
+        print("В разметке есть отсутствующие chunk_id:")
+        for chunk_id in missing_gold:
+            print(f"  {chunk_id}")
+        return 1
 
     configs = build_configs()
     report: dict[str, Any] = {
         "graph": str(graph_path),
         "questions": len(questions),
+        "relation_evidence": args.include_relation_evidence,
         "pools": {},
         "baselines": {},
     }
@@ -256,6 +271,7 @@ def main(argv: list[str] | None = None) -> int:
             max_candidates=pool,
             base_candidate_k=pool,
             graph_max_results=10,
+            include_relation_evidence=args.include_relation_evidence,
         )
         per_question: list[dict[str, Any]] = []
         latencies: list[float] = []

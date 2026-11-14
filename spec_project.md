@@ -140,6 +140,10 @@
 | NetworkX-граф: Document/Section/Chunk/Entity, extractor, graph retrieval | **С** | НОВОЕ: в курсе графа знаний нет; без дублирующего LlamaIndex store |
 | Связи Entity/DocumentNode/Chunk | **С** | НОВОЕ |
 
+Статус и измеренный результат: `spec_graph.md` §8. На dev-корпусе 2022–2023
+граф поднял recall свидетельств на multi-hop наборе с 0.62 до 0.75 (+13 п.п.)
+при небольшом снижении MRR; в WebUI пока не включён.
+
 ### 3.5. Eval
 
 | Компонент | Источник | Что делаем |

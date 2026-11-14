@@ -1,0 +1,88 @@
+[
+  {
+    "id": "strategy_capital_dividends",
+    "question": "Как Стратегия 2026 связывает дивиденды, рентабельность капитала и достаточность капитала?",
+    "relevant_chunk_ids": [
+      "sber_2023:00585:c0:73c877d84551",
+      "sber_2023:00136:c1:3335c25de148",
+      "sber_2023:00683:c0:d585ccfa7d8d"
+    ]
+  },
+  {
+    "id": "key_rate_nim_forecast",
+    "question": "Как повышение ключевой ставки связано с чистой процентной маржой и прогнозом доходов?",
+    "relevant_chunk_ids": [
+      "sber_2023:00064:c1:51fc02863122",
+      "sber_2023:00683:c0:d585ccfa7d8d",
+      "sber_2023:00524:c0:d8c805e18e7f"
+    ]
+  },
+  {
+    "id": "gigachat_kandinsky_finlit",
+    "question": "Как GigaChat и Kandinsky применяются в обучении финансовой грамотности?",
+    "relevant_chunk_ids": [
+      "sber_2023:00048:c1:fa358aad4f2d",
+      "sber_2023:00078:c1:269f35dc44ac",
+      "sber_2023:01001:c2:d21140c8f693"
+    ]
+  },
+  {
+    "id": "ecosystem_b2b_sberbusiness",
+    "question": "Как экосистема В2В и СберБизнес обслуживают корпоративных клиентов?",
+    "relevant_chunk_ids": [
+      "sber_2022:00774:c0:5e93d4050dfb",
+      "sber_2022:00127:c0:4edfa85d4f46",
+      "sber_2023:00312:c0:d89c12012c4f"
+    ]
+  },
+  {
+    "id": "cet1_dividends_2023",
+    "question": "Какая достаточность CET1 и дивидендные цели за 2023 год?",
+    "relevant_chunk_ids": [
+      "sber_2023:00136:c1:3335c25de148",
+      "sber_2023:00585:c0:73c877d84551"
+    ]
+  },
+  {
+    "id": "ai_products_clients",
+    "question": "Какие продукты на основе искусственного интеллекта Сбер предлагает клиентам?",
+    "relevant_chunk_ids": [
+      "sber_2023:00048:c1:fa358aad4f2d",
+      "sber_2023:00078:c1:269f35dc44ac"
+    ]
+  },
+  {
+    "id": "ecosystem_b2c_digital",
+    "question": "Какие цифровые сервисы и продукты входят в экосистему В2С?",
+    "relevant_chunk_ids": [
+      "sber_2023:00227:c0:1662185de5df",
+      "sber_2022:00106:c0:5c7b3ee545b0",
+      "sber_2022:00540:c0:76b795bd674e"
+    ]
+  },
+  {
+    "id": "profit_roe_nim_2023",
+    "question": "Как связаны чистая прибыль, ROE и чистая процентная маржа за 2023 год?",
+    "relevant_chunk_ids": [
+      "sber_2023:00078:c3:c5cc6e1f46e2",
+      "sber_2023:00136:c1:3335c25de148",
+      "sber_2023:00524:c0:d8c805e18e7f"
+    ]
+  },
+  {
+    "id": "strategy_ai_goals",
+    "question": "Какие технологические и ИИ-цели закреплены в Стратегии 2026?",
+    "relevant_chunk_ids": [
+      "sber_2023:00585:c0:73c877d84551",
+      "sber_2023:00078:c1:269f35dc44ac"
+    ]
+  },
+  {
+    "id": "retail_digital_growth",
+    "question": "Как росли активные розничные клиенты и цифровые каналы в 2022–2023 годах?",
+    "relevant_chunk_ids": [
+      "sber_2023:00227:c0:1662185de5df",
+      "sber_2022:00106:c0:5c7b3ee545b0"
+    ]
+  }
+]
