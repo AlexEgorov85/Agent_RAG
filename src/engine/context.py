@@ -77,6 +77,28 @@ class PackedContext:
         return [record["chunk_id"] for record in self.records]
 
     @property
+    def context_chunk_ids(self) -> list[str]:
+        """ID чанков, реально упакованных в ``text`` (в порядке появления).
+
+        Совпадает с :attr:`ContextManifest.included_chunk_ids`, но доступно
+        прямо на результате упаковки для ``diagnostics["context_chunk_ids"]``.
+        """
+        return [record["chunk_id"] for record in self.records]
+
+    @property
+    def skipped_chunk_ids(self) -> list[str]:
+        """ID чанков, которые не влезли в бюджет и были опущены целиком."""
+        return list(self.manifest.skipped)
+
+    @property
+    def context_stage(self) -> list[dict[str, Any]]:
+        """Этап ``context`` для retrieval trace: ID, ранг, без score."""
+        return [
+            {"chunk_id": record["chunk_id"], "rank": position, "score": None}
+            for position, record in enumerate(self.records, start=1)
+        ]
+
+    @property
     def evidence(self) -> dict[str, dict[str, Any]]:
         """Словарь свидетельств по ``chunk_id``, пригодный для генератора ответа."""
         return {record["chunk_id"]: record for record in self.records}

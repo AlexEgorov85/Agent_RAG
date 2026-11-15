@@ -1,7 +1,14 @@
 # Спецификация retrieval и RAG engine
 
 **Версия:** 1.0
-**Статус:** целевой контракт; retrieval/engine ещё предстоит реализовать.
+**Статус:** целевой контракт. Retrieval/engine реализованы (BM25 + dense + RRF,
+reranker, filters, rewriting, diversity, graph augmentation, context packing,
+answer/citations/abstain) и покрыты тестами. Полный корпус не собран, полный
+graph index не построен (используется dev-граф `66c0dbe3…`). На dev-корпусе
+реальный smoke даёт Recall@5 0.955; последний полный прогон 30 тестов —
+Recall@5 0.889, Recall@10 0.926, MRR 0.889, `pass_rate 0.767` (предыдущий —
+Recall@5 0.845, `pass_rate 0.8`). Recall@5 превышает целевой порог 0.85, но
+`pass_rate` ниже цели, а результаты не переносятся на полный корпус 9 PDF.
 **Связанные документы:** [spec_target.md](spec_target.md), [spec_graph.md](spec_graph.md)
 
 ## 1. Назначение

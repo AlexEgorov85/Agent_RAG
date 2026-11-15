@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+import json
+from types import SimpleNamespace
+
 from src.agent import AgentAction, AgentService, Answer, Citation
 from src.agent.state import QueryPlan
 from src.agent.tools import AgentTools
-from src.retrieval.hybrid_retriever import SearchFilters
+from src.engine.generator import AnswerGenerator
+from src.retrieval.hybrid_retriever import (
+    RetrievalHit,
+    RetrievalResult,
+    RetrievalTrace,
+    SearchFilters,
+)
 
 
 def hit(chunk_id: str = "chunk-1") -> dict:
@@ -95,8 +104,63 @@ def test_tools_forward_top_k_and_retrieval_mode_to_backend():
         },
     )
 
-    assert backend.kwargs["top_k"] == 3
+    # top_k — значение по умолчанию, а не потолок: selector просит 10.
+    assert backend.kwargs["top_k"] == 10
     assert backend.kwargs["retrieval_mode"] == "keyword"
+
+
+def test_tools_clip_requested_top_k_above_the_hard_limit():
+    class RetrieveBackend:
+        def __init__(self):
+            self.top_k = None
+
+        def retrieve(self, query, *, filters, top_k, retrieval_mode):
+            del query, filters, retrieval_mode
+            self.top_k = top_k
+            return {"hits": []}
+
+    backend = RetrieveBackend()
+    tools = AgentTools(search_backend=backend)
+
+    tools.invoke(
+        "search_reports",
+        {"query": "q", "filters": SearchFilters(), "top_k": 50},
+    )
+
+    assert backend.top_k == 10
+
+
+def test_tools_forward_rerank_per_year_only_to_supporting_backend():
+    class RerankBackend:
+        def __init__(self):
+            self.rerank_per_year = None
+
+        def retrieve(
+            self,
+            query,
+            *,
+            filters,
+            top_k,
+            retrieval_mode,
+            rerank_per_year=None,
+        ):
+            del query, filters, top_k, retrieval_mode
+            self.rerank_per_year = rerank_per_year
+            return {"hits": []}
+
+    backend = RerankBackend()
+    tools = AgentTools(search_backend=backend)
+
+    tools.invoke(
+        "search_reports",
+        {
+            "query": "q",
+            "filters": SearchFilters(),
+            "rerank_per_year": True,
+        },
+    )
+
+    assert backend.rerank_per_year is True
 
 
 def test_router_plan_adds_year_and_section_filters():
@@ -277,12 +341,12 @@ def test_tool_budgets_stop_loops():
         action_selector=selector,
     )
     result = service_instance.ask("structure?", conversation_id="budget")
-    assert len(result.tool_events) == 8
+    assert len(result.tool_events) == 4
     assert "tool_budget_exhausted" in result.warnings
     assert result.answer.status == "abstain"
 
 
-def test_search_budget_is_five_calls():
+def test_search_budget_is_two_calls():
     search = FakeSearch()
     selector = SequenceSelector(
         [
@@ -295,8 +359,8 @@ def test_search_budget_is_five_calls():
         answerer=AnswerFromEvidence(),
         action_selector=selector,
     ).ask("query", conversation_id="search-budget")
-    assert len(search.calls) == 5
-    assert len(result.tool_events) == 5
+    assert len(search.calls) == 2
+    assert len(result.tool_events) == 2
     assert "tool_budget_exhausted" in result.warnings
 
 
@@ -407,7 +471,10 @@ def test_history_is_passed_to_router_selector_and_answerer_per_conversation():
         ):
             answer_histories.append((question, history))
             evidence_seen.append((question, set(evidence_manifest)))
-            chunk_id = next(iter(evidence_manifest))
+            # Цитируем свежий хит текущего вопроса, а не перенесённый chunk.
+            chunk_id = next(
+                item for item in evidence_manifest if item.startswith(question)
+            )
             return Answer("answer", f"answer:{question}", [Citation(chunk_id)])
 
     app = AgentService(
@@ -434,8 +501,13 @@ def test_history_is_passed_to_router_selector_and_answerer_per_conversation():
     assert router_histories[2] == ("other conversation", [])
     assert selector_histories[2] == ("other conversation", [])
     assert answer_histories[2] == ("other conversation", [])
-    # Прошлые ходы — только контекст: второй ответ видит лишь свой свежий хит.
-    assert evidence_seen[1] == ("second question", {"second question-id"})
+    # Follow-up сохраняет подтверждённые цитаты прошлого хода: второго ответа
+    # касаются и перенесённый chunk, и его собственный свежий хит. Текст
+    # истории при этом остаётся только контекстом и не цитируется.
+    assert evidence_seen[1] == (
+        "second question",
+        {"second question-id", "first question api_key=superSecret-id"},
+    )
     assert second.answer.citations[0].chunk_id == "second question-id"
     assert isolated.answer.citations[0].chunk_id == "other conversation-id"
 
@@ -463,3 +535,177 @@ def test_conversation_history_is_bounded_to_last_ten_turns():
     assert final_history[0] == {"role": "user", "content": "q1"}
     assert final_history[-1] == {"role": "assistant", "content": "answer:q10"}
     assert all(set(item) == {"role", "content"} for item in final_history)
+
+
+# --- diagnostics: context_chunk_ids, retrieval_calls, evidence manifests ----
+
+
+class _JsonCompletions:
+    def __init__(self, chunk_id: str) -> None:
+        self.chunk_id = chunk_id
+        self.calls: list[dict] = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        payload = json.dumps(
+            {
+                "status": "answer",
+                "answer": "Ответ по упакованному источнику.",
+                "citations": [{"chunk_id": self.chunk_id}],
+                "facts": [],
+                "warnings": [],
+            },
+            ensure_ascii=False,
+        )
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=payload))]
+        )
+
+
+class _JsonClient:
+    def __init__(self, chunk_id: str) -> None:
+        self.completions = _JsonCompletions(chunk_id)
+        self.chat = SimpleNamespace(completions=self.completions)
+
+
+def _chunk(chunk_id: str, *, text: str, year: int = 2023) -> dict:
+    return {
+        "chunk_id": chunk_id,
+        "doc_id": "report-2023",
+        "year": year,
+        "text": text,
+    }
+
+
+def _nested_hit(chunk: dict) -> dict:
+    return {"chunk_id": chunk["chunk_id"], "chunk": chunk}
+
+
+def test_diagnostics_context_ids_contain_only_packed_chunks():
+    packed = _chunk("packed", text="short evidence")
+    oversized = _chunk("oversized", text="H" * 10_000)
+    search = FakeSearch([_nested_hit(packed), _nested_hit(oversized)])
+    selector = SequenceSelector(
+        [AgentAction("search_reports", {"query": "q"}, "fact_lookup")]
+    )
+    answerer = AnswerGenerator(
+        _JsonClient("packed"), "test-model", max_context_chars=2_000
+    )
+    result = AgentService(
+        AgentTools(search_backend=search),
+        answerer=answerer,
+        action_selector=selector,
+    ).ask("Прибыль?", conversation_id="context-ids")
+
+    assert result.answer.status == "answer"
+    # context ids — именно упакованные чанки, а не весь evidence manifest.
+    assert result.diagnostics["context_chunk_ids"] == ["packed"]
+    assert result.diagnostics["context_source"] == "context"
+    assert set(result.diagnostics["evidence_manifest"]) == {"packed", "oversized"}
+
+
+def test_context_source_falls_back_when_generator_hides_context():
+    result = service().ask("What was net income?", conversation_id="no-context")
+
+    assert result.diagnostics["context_chunk_ids"] is None
+    assert result.diagnostics["context_source"] == "evidence_manifest"
+    assert result.diagnostics["evidence_manifest"] == ["chunk-1"]
+
+
+def test_retrieval_calls_carry_trace_stages_and_counts():
+    class TraceSearch:
+        def retrieve(self, query, *, filters, top_k=None, retrieval_mode="hybrid"):
+            return RetrievalResult(
+                hits=[RetrievalHit(chunk_id="chunk-1", chunk=_chunk(
+                    "chunk-1", text="Net income was 10."))],
+                effective_filters=filters or SearchFilters(),
+                trace=RetrievalTrace(
+                    retrieval_mode=retrieval_mode,
+                    dense_candidates=2,
+                    bm25_candidates=3,
+                    fused_candidates=4,
+                    rerank_candidates=1,
+                    returned=1,
+                    stages={
+                        "dense": [{"chunk_id": "chunk-1", "rank": 1, "score": 0.9}],
+                        "bm25": [{"chunk_id": "chunk-1", "rank": 2, "score": 4.2}],
+                        "returned": [
+                            {"chunk_id": "chunk-1", "rank": 1, "score": 0.9}
+                        ],
+                    },
+                    available={"dense": True, "bm25": True, "returned": True},
+                    fallback={"reranker": False},
+                    unavailable={"rerank": "disabled"},
+                ),
+            )
+
+    result = AgentService(
+        AgentTools(search_backend=TraceSearch()),
+        answerer=AnswerFromEvidence(),
+        action_selector=SequenceSelector(
+            [AgentAction("search_reports", {"query": "net income"}, "fact_lookup")]
+        ),
+    ).ask("What was net income?", conversation_id="trace-diagnostics")
+
+    calls = result.diagnostics["retrieval_calls"]
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["call_index"] == 0
+    assert call["tool_name"] == "search_reports"
+    assert call["retrieval_mode"] == "hybrid"
+    assert call["top_k"] == AgentTools().top_k
+    assert call["status"] == "completed"
+    assert call["counts"] == {
+        "dense": 2, "bm25": 3, "rrf": 4, "rerank": 1, "returned": 1,
+    }
+    assert [item["chunk_id"] for item in call["stages"]["dense"]] == ["chunk-1"]
+    assert call["available"]["bm25"] is True
+    assert call["unavailable"] == {"rerank": "disabled"}
+
+
+def test_diagnostics_keep_primary_and_graph_evidence_manifests_separate():
+    result = service().ask("What was net income?", conversation_id="manifests")
+
+    assert result.diagnostics["evidence_manifest"] == ["chunk-1"]
+    assert result.diagnostics["graph_evidence_manifest"] == []
+
+
+def test_smalltalk_answers_without_retrieval():
+    search = FakeSearch()
+    events = list(service(search).stream("Привет!", conversation_id="smalltalk"))
+
+    result = events[-1].result
+    assert [event.event_type for event in events] == ["run_started", "run_completed"]
+    assert result is not None
+    assert result.status == "completed"
+    assert result.answer.status == "answer"
+    assert result.answer.citations == []
+    assert result.answer.facts == []
+    assert result.warnings == []
+    assert result.tool_events == []
+    assert result.diagnostics["smalltalk"] is True
+    assert "Здравствуйте" in result.answer.answer
+    assert search.calls == []
+
+
+def test_greeting_with_question_still_uses_retrieval():
+    search = FakeSearch()
+    result = service(search).ask(
+        "Привет! What was net income in 2023?", conversation_id="greeting-question"
+    )
+
+    assert result.answer.citations[0].chunk_id == "chunk-1"
+    assert result.diagnostics.get("smalltalk") is None
+    assert len(search.calls) == 1
+
+
+def test_smalltalk_does_not_pollute_history():
+    agent = service()
+    agent.ask("Привет!", conversation_id="history")
+    assert agent._history_snapshot("history") == []
+
+    result = agent.ask("What was net income?", conversation_id="history")
+    assert result.answer.citations
+    contents = [item["content"] for item in agent._history_snapshot("history")]
+    assert all("Здравствуйте" not in content for content in contents)
+    assert contents[0] == "What was net income?"

@@ -28,6 +28,7 @@ llama-index-llms-openai>=0.2        # OpenAI-совместимые LLM
 
 # --- Поиск (курс, Занятия 3/5) ---
 numpy>=1.26                         # DenseIndex: матрица векторов, косинус
+faiss-cpu>=1.8                      # постоянный индекс эмбеддингов (Windows-колесо доступно)
 pandas>=2.1                         # вывод результатов поиска/eval (курсовой код)
 rank-bm25>=0.2.2                    # BM25Okapi (курсовой hybrid search)
 pymorphy3>=2.0                      # русская лемматизация для BM25-tokenize
@@ -46,6 +47,11 @@ networkx>=3.1                       # граф в памяти
 streamlit>=1.38                     # чат + интерактивный прототип
 streamlit-agraph>=0.0.45            # рендер графа в Streamlit
 
+# --- Web API adapter (React WebUI, docs/specs/web-ui-modernization.md) ---
+fastapi>=0.115                      # ASGI adapter, Pydantic-контракты
+uvicorn>=0.30                       # запуск: uvicorn src.api.app:app --port 8000
+httpx>=0.27                         # fastapi.testclient.TestClient (офлайн-тесты)
+
 # --- Eval (курсовой — Занятия 3/8) ---
 # формат dev-вопросов, ranking_metrics и LLM-судья — код курса через Cloud.ru API;
 # отдельные eval-библиотеки — выше в «Опциональных».
@@ -62,3 +68,4 @@ pillow>=10.0                        # обработка изображений
 
 # --- Dev-зависимости (тесты) ---
 pytest>=8.0                         # unit/интеграционные тесты (tests/)
+pytest-timeout>=2.3                 # защита от зависаний на файловых lock/SSE

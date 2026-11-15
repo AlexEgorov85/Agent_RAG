@@ -7,13 +7,19 @@ from src.retrieval.hybrid_retriever import SearchFilters
 from src.ui.app import (
     build_service_filters,
     event_result,
+    main,
     new_conversation_id,
     normalize_filters,
     safe_tool_arguments,
     service_options,
     summarize_event,
 )
-from src.ui.citations import citation_metadata, citation_quote
+from src.ui.citations import (
+    api_base_url,
+    citation_metadata,
+    citation_pdf_link,
+    citation_quote,
+)
 
 
 def test_citation_helpers_select_contract_metadata_and_quote() -> None:
@@ -209,3 +215,169 @@ def test_event_direct_fields_take_precedence_over_nested_data() -> None:
     assert summary["tool_name"] == "get_chunk"
     assert summary["result_count"] == 1
     assert summary["duration_ms"] == 7
+
+
+def test_citation_pdf_link_uses_default_api_base_and_page_fragment(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("API_BASE_URL", raising=False)
+
+    link = citation_pdf_link({"doc_id": "sber_2023", "page_pdf": 42})
+
+    assert link == {
+        "available": True,
+        "url": "http://127.0.0.1:8000/api/documents/sber_2023/file#page=42",
+        "label": "Открыть PDF, стр. 42",
+        "page": 42,
+    }
+    assert api_base_url() == "http://127.0.0.1:8000"
+
+
+def test_citation_pdf_link_without_page_has_no_fragment(monkeypatch) -> None:
+    monkeypatch.delenv("API_BASE_URL", raising=False)
+
+    link = citation_pdf_link({"doc_id": "sber_2023", "page_pdf": None})
+
+    assert link["available"] is True
+    assert link["url"] == "http://127.0.0.1:8000/api/documents/sber_2023/file"
+    assert "#page=" not in link["url"]
+    assert link["label"] == "Открыть PDF"
+    assert link["page"] is None
+
+
+def test_citation_pdf_link_does_not_invent_url_without_doc_id(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("API_BASE_URL", "https://reports.example.test")
+
+    for citation in (
+        {"page_pdf": 10},
+        {"doc_id": "", "page_pdf": 10},
+        {"doc_id": "   ", "page_pdf": 10},
+    ):
+        link = citation_pdf_link(citation)
+        assert link == {
+            "available": False,
+            "url": None,
+            "label": "PDF недоступен",
+            "page": None,
+        }
+
+
+def test_citation_pdf_link_honours_api_base_url_override(monkeypatch) -> None:
+    monkeypatch.setenv("API_BASE_URL", " https://reports.example.test/root/ ")
+
+    link = citation_pdf_link({"doc_id": "sber_2023", "page_pdf": 7})
+
+    assert link["url"] == (
+        "https://reports.example.test/root/api/documents/sber_2023/file#page=7"
+    )
+    assert api_base_url() == "https://reports.example.test/root"
+
+
+def test_citation_pdf_link_supports_2015_issuer_without_hiding_it(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("API_BASE_URL", raising=False)
+    citation = {
+        "chunk_id": "bbs_2015:00001:c0",
+        "doc_id": "bbs_2015",
+        "year": 2015,
+        "issuer": "БПС-Сбербанк (Беларусь)",
+        "section_path": "Основные показатели",
+        "page_pdf": 5,
+        "quote": "Цитата 2015",
+    }
+
+    metadata = citation_metadata(citation)
+    link = citation_pdf_link(citation)
+
+    assert metadata["issuer"] == "БПС-Сбербанк (Беларусь)"
+    assert metadata["year"] == 2015
+    assert metadata["section_path"] == "Основные показатели"
+    assert metadata["chunk_id"] == "bbs_2015:00001:c0"
+    assert link["available"] is True
+    assert link["url"] == (
+        "http://127.0.0.1:8000/api/documents/bbs_2015/file#page=5"
+    )
+    assert link["label"] == "Открыть PDF, стр. 5"
+
+
+def test_citation_pdf_link_ignores_invalid_page_and_encodes_doc_id(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("API_BASE_URL", raising=False)
+
+    for page in (0, -3, True, "abc", ""):
+        link = citation_pdf_link({"doc_id": "sber_2023", "page_pdf": page})
+        assert link["available"] is True
+        assert link["url"] == (
+            "http://127.0.0.1:8000/api/documents/sber_2023/file"
+        )
+        assert link["label"] == "Открыть PDF"
+
+    encoded = citation_pdf_link({
+        "doc_id": "sber 2015/отчёт",
+        "page_pdf": 3,
+    })
+    assert encoded["url"] == (
+        "http://127.0.0.1:8000/api/documents/"
+        "sber%202015%2F%D0%BE%D1%82%D1%87%D1%91%D1%82/file#page=3"
+    )
+
+
+class _SessionState(dict):
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
+
+    def __setattr__(self, name, value) -> None:
+        self[name] = value
+
+
+class _FakeStreamlit:
+    """Minimal st stub for headless ``main()`` tests."""
+
+    def __init__(self) -> None:
+        self.session_state = _SessionState()
+        self.sidebar = self
+        self.calls: list[str] = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        return None
+
+    def multiselect(self, *args, **kwargs):
+        return []
+
+    def button(self, *args, **kwargs):
+        return False
+
+    def chat_input(self, *args, **kwargs):
+        return None
+
+    def error(self, *args, **kwargs):
+        self.calls.append("error")
+
+    def title(self, *args, **kwargs):
+        self.calls.append("title")
+
+    def __getattr__(self, name):
+        def noop(*args, **kwargs):
+            self.calls.append(name)
+        return noop
+
+
+def test_main_renders_without_backend() -> None:
+    st = _FakeStreamlit()
+
+    main(agent_service=None, service_factory=lambda: None, st_module=st)
+
+    assert "title" in st.calls
+    assert "error" in st.calls
+    assert st.session_state.messages == []
+    assert st.session_state.conversation_id

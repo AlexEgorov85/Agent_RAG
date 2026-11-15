@@ -6,8 +6,10 @@
 **Связанные документы:** [spec_agent.md](spec_agent.md), [spec_retrieval_engine.md](spec_retrieval_engine.md), [spec_graph.md](spec_graph.md), [spec_ui_eval.md](spec_ui_eval.md), [spec_pdf_parser.md](spec_pdf_parser.md)
 
 > Этот документ фиксирует целевое поведение и критерии готовности. Он не утверждает,
-> что все описанные компоненты уже существуют. Текущая реализация ограничена ingestion:
-> PDF-парсер, чтение outline, построение структуры и чанкинг. См. §2.
+> что все описанные компоненты уже существуют. Backend-контур (ingestion, retrieval,
+> engine, агент), Streamlit UI, HTTP API, React WebUI этапов 1–4 и инфраструктура
+> benchmark реализованы; полный корпус 9 PDF, benchmark на полном корпусе и хвост
+> этапа 5 React WebUI ещё не готовы. См. §2.
 
 ## 1. Цель и границы
 
@@ -37,17 +39,51 @@ Graph RAG — расширение retrieval, а не обязательный �
 
 | Слой | Сейчас | Целевое состояние |
 |---|---|---|
-| PDF ingestion | `pdf_parser.py`, модели/конфиг, CLI; батчевый парсинг и resume | Проверенные артефакты всех входных PDF, отчёт о пропусках/качестве |
-| Структура | `pdf_outline.py`, `structure_builder.py`; JSON-артефакты имеются для 2023 | Воспроизводимое дерево для каждого обработанного отчёта |
-| Чанки | `pdf_to_chunks.py`, `chunk_enricher.py` | Корпус чанков с метаданными, структурой и валидацией |
-| Dense/keyword retrieval | Не реализован | Dense + BM25 с metadata/structure eligibility |
-| Router/reranker/generation | Не реализованы | Query planning, hybrid retrieval, reranking, ответ с citations/abstain |
-| Graph | Не реализован | Индекс разделов/чанков/сущностей и ограниченный graph retrieval |
-| UI | Не реализован | Streamlit: чат, citations, структура, годы, граф |
-| Eval | Нет датасета и evaluation pipeline | Версионируемый датасет, retrieval и answer metrics, отчёты |
+| PDF ingestion | `pdf_parser.py`, модели/конфиг, CLI; батчевый `hi_res`/`fast`, OCR и resume; `source_registry`, `scripts/build_corpus.py`, `verify_corpus.py`. В `data/raw` 9 PDF; `elements` готовы для 2015–2018, документы 2019–2024 не парсились | Проверенные артефакты всех входных PDF, отчёт о пропусках/качестве |
+| Структура | `pdf_outline.py`, `structure_builder.py` (закладки → TOC → эвристика); sections для 2015–2018, для 2017 структура приблизительная | Воспроизводимое дерево для каждого обработанного отчёта |
+| Чанки | `pdf_to_chunks.py`, `chunk_enricher.py`, CLI; 3928 чанков для 2015–2018 (98% со структурой) и отдельный dev-корпус из 4 документов (1025 чанков) | Корпус чанков с метаданными, структурой и валидацией |
+| Dense/keyword retrieval | BM25 + dense, RRF, metadata/structure eligibility, filters, rewriting, diversity, `RetrievalTrace`; dense — постоянный FAISS `IndexFlatIP` с fallback на in-memory `DenseIndex` | Dense + BM25 с metadata/structure eligibility |
+| Router/reranker/generation | LLM/Simple router, selector, CoverageReport, verification и repair, calculations, answer с citations/abstain, retrieval fallback для structural-запросов — реализованы | Query planning, hybrid retrieval, reranking, ответ с citations/abstain |
+| Graph | Graph builder/retriever, `GraphAugmentedRetriever`, `use_graph`, provenance и fallback; в фабрике активен полный dev-граф `66c0dbe3…` (536 чанков, 2022–2023); полный `b288dd3c…` собран на 1916/3928 и имеет `status=incomplete` | Индекс разделов/чанков/сущностей и ограниченный graph retrieval |
+| UI | Streamlit: чат, citations, coverage metric×year, verification, retrieval stages, structure, graph-only evidence, ссылки на PDF; React WebUI этапов 1–4 (чат, история, evidence, таблицы/графики/CSV, структурное сравнение, cancel/resync, Evaluation UI) | Streamlit — legacy, React — целевой UI |
+| Eval | `eval/`: dataset validation, metrics, runner, report, judge-интерфейс; датасет 30 тестов (10/10/5/5), 12 smoke + 6 holdout; реальный smoke 12/12, последний полный прогон 23/30 (`pass_rate 0.767`), предыдущий 24/30 | Версионируемый датасет, retrieval и answer metrics, отчёты |
+| API / React WebUI | `src/api/` — полный adapter (CRUD, SSE, evidence, PDF `inline`, capabilities); `frontend/` — React-чат этапов 1–4 (citations `[n]`, PDF-ссылки, таблицы/графики/CSV, структурное сравнение, cancel/resync) и Evaluation UI; E2E 7/7, 160 unit-тестов в 24 файлах | HTTP API и React WebUI по `docs/specs/*` |
+| Evaluation API | `/api/evaluation/*`: suites, runs, tests, trace, report, cancel, compare; 20 тестов; выключен по умолчанию (`EVAL_UI_ENABLED=0`), прогресс — polling, SSE нет | — |
 
-В текущем окружении проектные тесты проходят в `.venv` (Python 3.11.9). Проверка
-только ingestion-тестов не является приёмкой целого продукта.
+В текущем окружении проектные тесты проходят в `.venv` (Python 3.11.9):
+`854 passed` (снимок 15.11.2026); frontend — `160 passed` в 24 файлах,
+Playwright E2E — `7/7`, `tsc -b` и `vite build` без ошибок;
+`openspec validate --all --strict` проходит. Реальная приёмка dev-корпуса —
+4/4 (factoid, temporal, structural, abstain; снимок 02:44, после P1/P2 не
+перепрогонялась). Benchmark: реальный smoke `12/12` (Recall@5 0.955);
+последний полный реальный прогон 30 тестов — `23/30` (`pass_rate 0.767`,
+execution coverage 1.0, Recall@5 0.889, Recall@10 0.926, MRR 0.889, evidence
+coverage 0.897; easy 100%, medium 80%, hard 40%, multi_turn 60%; dev 19/24,
+holdout 4/6), артефакт `eval/results/20261115_183541_0a97989/`. Предыдущий
+прогон дал `24/30` (`174124`), поэтому per-test стабильность не доказана
+(`repeat=1`). Проверка только ingestion-тестов не является приёмкой целого
+продукта.
+
+Не готово:
+
+- полный корпус 9 PDF: документы 2019–2024 не парсились, производные артефакты
+  и `verify_corpus.py` относятся только к 2015–2018;
+- полный graph index: `b288dd3c…` собран на 1916/3928 чанков и имеет
+  `status=incomplete`; активен только dev-граф `66c0dbe3…` (536 чанков,
+  2022–2023);
+- benchmark на полном корпусе и `expected_corpus_sha256` для него: текущие
+  цифры (23/30) получены на dev-корпусе из 1025 чанков; holdout пересекается
+  с dev по gold-чанкам в 4 тестах (`holdout_gold_overlap`);
+- `context_chunk_ids` доступны не для всех кейсов, поэтому context coverage
+  частично `not_measured`;
+- judge-калибровка на размеченных ответах; реальные прогоны идут `--no-judge`;
+- Evaluation SSE-прогресс (polling реализован; SSE остаётся опциональным);
+- хвост этапа 5 React WebUI: удаление Streamlit; пагинация истории и часть
+  a11y закрыты, bundle-split убрал warning >500 kB, но нет scroll-anchoring,
+  полного focus-trap/аудита доступности и SSE Evaluation.
+
+Issuer-фильтр в чанках и изоляция 2015 (БПС-Сбербанк) реализованы
+(`enrich_chunks_with_registry`, `PerYearSearch._excluded_years`).
 
 ## 3. Корпус и интерпретация данных
 
@@ -138,27 +174,37 @@ PDF / реестр источников
 
 ```text
 src/core/
-  config.py, models.py, credentials.py
-  embeddings.py, cache.py, dense_index.py
+  config.py, models.py, credentials.py, rag_config.py
+  embeddings.py, cache.py, dense_index.py, faiss_index.py
+  corpus.py, source_registry.py, llm_lock.py
 src/ingestion/
   pdf_parser.py, pdf_outline.py, structure_builder.py
-  pdf_to_chunks.py, chunk_enricher.py
+  pdf_to_chunks.py, chunk_enricher.py, corpus_validator.py, cli.py
 src/retrieval/
   bm25.py, rrf.py, reranker.py, rewrite.py
-  query_router.py, structure_filter.py, hybrid_retriever.py
-  graph_retriever.py
+  hybrid_retriever.py, temporal_search.py
+  graph_retriever.py, graph_hybrid.py
 src/graph/
   graph_models.py, graph_builder.py, entity_extractor.py
 src/engine/
-  context.py, prompts.py, rag_engine.py, graph_rag_engine.py
+  context.py, prompts.py, rag_engine.py, generator.py
+  calculations.py, structure_compare.py, llm.py
 src/agent/
-  agent_graph.py, state.py, tools.py, service.py
+  agent_graph.py, state.py, tools.py, service.py, factory.py
+  selector.py, simple_router.py, llm_router.py
+  coverage.py, verification.py, smalltalk.py
+src/api/
+  app.py, config.py, schemas.py, services.py, serialize.py, store.py
+  auth.py, bootstrap.py, streaming.py, execution.py, evaluation_store.py
+  routes/
 src/ui/
-  app.py, citations.py, structure_view.py, graph_view.py, timeline_view.py
+  app.py, citations.py
 eval/
-  dataset.jsonl, metrics.py, judge.py, run_eval.py
+  dataset.py, metrics.py, runner.py, report.py, trace.py
+  run_eval.py            # alias eval.runner
 scripts/
-  build_corpus.py, build_indexes.py, verify_corpus.py
+  build_corpus.py, build_dev_corpus.py, build_full_graph.py
+  verify_corpus.py, acceptance_dev.py, eval_retrieval.py
 ```
 
 Реализованные файлы сохраняют текущие публичные функции либо предоставляют явный

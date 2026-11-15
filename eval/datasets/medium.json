@@ -1,0 +1,1083 @@
+{
+  "schema_version": "1.1",
+  "suite": "medium",
+  "expected_corpus_sha256": "64c9997e9ef5ee7bb5455bdd6c098d0736e8c9605b7e30f29197557eba719a8e",
+  "tests": [
+    {
+      "id": "medium_001",
+      "suite": "medium",
+      "split": "dev",
+      "category": "temporal",
+      "difficulty": "medium",
+      "tags": [
+        "smoke",
+        "numeric",
+        "2017"
+      ],
+      "question": "Как изменился совокупный кредитный портфель Группы в 2017 году?",
+      "filters": {
+        "years": [
+          2017
+        ],
+        "allowed_doc_ids": [
+          "sber_2017"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "Совокупный кредитный портфель Группы вырос на 6,6%.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "credit_portfolio_growth",
+            "metric_aliases": [
+              "кредитный портфель",
+              "совокупный кредитный портфель"
+            ],
+            "year": 2017,
+            "value": 6.6,
+            "unit": "%",
+            "unit_aliases": [
+              "процент",
+              "процентов"
+            ],
+            "tolerance": 0.01
+          }
+        ],
+        "required_years": [
+          2017
+        ],
+        "required_documents": [
+          "sber_2017"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [
+          "рост портфеля",
+          "единица измерения"
+        ],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "credit_portfolio_2017",
+            "any_of": [
+              "sber_2017:00193:c1:35f0d643c79c"
+            ],
+            "section": "Финансовая результативность"
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 4,
+        "max_tool_calls": 6,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "кредитн"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "Фрагмент отчёта за 2017 год, стр. 7: совокупный кредитный портфель вырос на 6,6%."
+    },
+    {
+      "id": "medium_002",
+      "suite": "medium",
+      "split": "dev",
+      "category": "fact_lookup",
+      "difficulty": "medium",
+      "tags": [
+        "smoke",
+        "numeric",
+        "2023"
+      ],
+      "question": "Сколько пользователей было у GigaChat в 2023 году?",
+      "filters": {
+        "years": [
+          2023
+        ],
+        "allowed_doc_ids": [
+          "sber_2023"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "Число пользователей GigaChat достигло 2,6 млн человек.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "gigachat_users",
+            "metric_aliases": [
+              "пользователей gigachat",
+              "пользователи gigachat",
+              "gigachat"
+            ],
+            "year": 2023,
+            "value": 2.6,
+            "unit": "млн человек",
+            "unit_aliases": [
+              "млн человек",
+              "млн пользователей",
+              "миллиона человек"
+            ],
+            "tolerance": 0.01
+          }
+        ],
+        "required_years": [
+          2023
+        ],
+        "required_documents": [
+          "sber_2023"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [
+          "значение",
+          "единица измерения"
+        ],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "gigachat_users_2023",
+            "any_of": [
+              "sber_2023:00078:c1:269f35dc44ac",
+              "sber_2023:00449:c1:d5b961bf8bb6"
+            ],
+            "section": "Технологии и ИИ"
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 4,
+        "max_tool_calls": 6,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "GigaChat"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "Число пользователей 2,6 млн подтверждено фрагментами отчёта за 2023 год, стр. 8 и 18."
+    },
+    {
+      "id": "medium_003",
+      "suite": "medium",
+      "split": "dev",
+      "category": "fact_lookup",
+      "difficulty": "medium",
+      "tags": [
+        "smoke",
+        "2022"
+      ],
+      "question": "Какие изменения в экосистеме B2B и обслуживании корпоративных клиентов произошли в 2022 году?",
+      "filters": {
+        "years": [
+          2022
+        ],
+        "allowed_doc_ids": [
+          "sber_2022"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "Сбер начал выдавать кредиты компаниям в юанях, запустил бивалютные депозиты в интернет-банке СберБизнес, расширил список допустимых валют для конверсии и запустил платформу SberTrade.",
+      "expected": {
+        "required_facts": [],
+        "required_years": [
+          2022
+        ],
+        "required_documents": [
+          "sber_2022"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [
+          "кредиты в юанях",
+          "SberTrade"
+        ],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "b2b_changes_2022",
+            "any_of": [
+              "sber_2022:00774:c0:5e93d4050dfb"
+            ],
+            "section": "Экосистема B2B"
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 4,
+        "max_tool_calls": 6,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "юан"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "Фрагмент отчёта за 2022 год, стр. 39: кредиты в юанях, бивалютные депозиты, SberTrade. Формулировка уточнена до раздела «Экосистема B2B»: «обслуживание корпоративных клиентов» без этого уточнения указывает на розничный сервис в отделениях."
+    },
+    {
+      "id": "medium_004",
+      "suite": "medium",
+      "split": "dev",
+      "category": "abstain",
+      "difficulty": "medium",
+      "tags": [
+        "smoke",
+        "abstain",
+        "2021"
+      ],
+      "question": "Какая чистая прибыль Сбербанка за 2021 год?",
+      "filters": {
+        "years": [
+          2021
+        ]
+      },
+      "expected_status": "abstain",
+      "expected": {
+        "required_facts": [],
+        "required_years": [],
+        "required_documents": [],
+        "required_issuers": [],
+        "required_answer_elements": [
+          "причина отказа"
+        ],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": [
+          2021
+        ],
+        "reason_codes": [
+          "missing_year"
+        ]
+      },
+      "gold_evidence": {
+        "min_coverage": 0.0,
+        "groups": []
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 2,
+        "max_tool_calls": 4,
+        "must_use_tools": [],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "search_reports"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": false,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [
+          "missing_year"
+        ],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "2021 год физически отсутствует в dev-корпусе (доступны 2016, 2017, 2022, 2023); ожидается abstain с причиной."
+    },
+    {
+      "id": "medium_005",
+      "suite": "medium",
+      "split": "dev",
+      "category": "temporal",
+      "difficulty": "medium",
+      "tags": [
+        "multi_year",
+        "numeric",
+        "profit"
+      ],
+      "question": "Сравните чистую прибыль Группы Сбербанк за 2016 и 2017 годы.",
+      "filters": {
+        "years": [
+          2016,
+          2017
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "В 2016 году чистая прибыль составила 541,9 млрд руб., в 2017 году — 748,7 млрд руб.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "net_profit",
+            "metric_aliases": [
+              "чистая прибыль",
+              "прибыль"
+            ],
+            "year": 2016,
+            "value": 541.9,
+            "unit": "млрд руб.",
+            "unit_aliases": [
+              "млрд рублей",
+              "млрд руб",
+              "млрд RUB"
+            ],
+            "tolerance": 0.01
+          },
+          {
+            "metric": "net_profit",
+            "metric_aliases": [
+              "чистая прибыль",
+              "прибыль"
+            ],
+            "year": 2017,
+            "value": 748.7,
+            "unit": "млрд руб.",
+            "unit_aliases": [
+              "млрд рублей",
+              "млрд руб",
+              "млрд RUB"
+            ],
+            "tolerance": 0.01
+          }
+        ],
+        "required_years": [
+          2016,
+          2017
+        ],
+        "required_documents": [
+          "sber_2016",
+          "sber_2017"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [
+          "значение за 2016",
+          "значение за 2017",
+          "единица измерения"
+        ],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "net_profit_2016",
+            "any_of": [
+              "sber_2016:00480:c2:aadd91380839",
+              "sber_2016:00156:c0:999ef1e8a2db"
+            ],
+            "section": "Обзор рынка"
+          },
+          {
+            "id": "net_profit_2017",
+            "any_of": [
+              "sber_2017:00475:c2:6e59229e2a43",
+              "sber_2017:00684:c0:1b24389a6d03"
+            ],
+            "section": "Стратегический отчет/Обращение Президента, Председателя Правления"
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 4,
+        "max_tool_calls": 6,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "2016",
+          "2017",
+          "re:541[.,]9",
+          "re:748[.,]7"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [
+          2018,
+          2019,
+          2020
+        ],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "2016: стр. 26 — 541,9 млрд руб. 2017: стр. 13 — 748,7 млрд руб."
+    },
+    {
+      "id": "medium_006",
+      "suite": "medium",
+      "split": "dev",
+      "category": "temporal",
+      "difficulty": "medium",
+      "tags": [
+        "numeric",
+        "2023",
+        "loan_portfolio"
+      ],
+      "question": "Как изменился кредитный портфель Сбера по корпоративному и розничному сегментам в 2023 году?",
+      "filters": {
+        "years": [
+          2023
+        ],
+        "allowed_doc_ids": [
+          "sber_2023"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "Корпоративный портфель вырос до 23,3 трлн руб. (+25,2%), розничный — до 16,1 трлн руб. (+29,3%).",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "corporate_loan_portfolio",
+            "metric_aliases": [
+              "корпоративный портфель",
+              "кредиты корпоративным клиентам"
+            ],
+            "year": 2023,
+            "value": 23.3,
+            "unit": "трлн руб.",
+            "unit_aliases": [
+              "трлн рублей",
+              "трлн руб",
+              "трлн"
+            ],
+            "tolerance": 0.01
+          },
+          {
+            "metric": "retail_loan_portfolio",
+            "metric_aliases": [
+              "розничный портфель",
+              "кредиты частным клиентам"
+            ],
+            "year": 2023,
+            "value": 16.1,
+            "unit": "трлн руб.",
+            "unit_aliases": [
+              "трлн рублей",
+              "трлн руб",
+              "трлн"
+            ],
+            "tolerance": 0.01
+          },
+          {
+            "metric": "corporate_loan_growth",
+            "metric_aliases": [
+              "корпоративный портфель",
+              "рост"
+            ],
+            "year": 2023,
+            "value": 25.2,
+            "unit": "%",
+            "unit_aliases": [
+              "процент",
+              "процентов"
+            ],
+            "tolerance": 0.01
+          },
+          {
+            "metric": "retail_loan_growth",
+            "metric_aliases": [
+              "розничный портфель",
+              "рост"
+            ],
+            "year": 2023,
+            "value": 29.3,
+            "unit": "%",
+            "unit_aliases": [
+              "процент",
+              "процентов"
+            ],
+            "tolerance": 0.01
+          }
+        ],
+        "required_years": [
+          2023
+        ],
+        "required_documents": [
+          "sber_2023"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [
+          "корпоративный сегмент",
+          "розничный сегмент",
+          "темпы роста"
+        ],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "corporate_loans_2023",
+            "any_of": [
+              "sber_2023:00568:c0:222151d983a4",
+              "sber_2023:01378:c3:c2660d767ece"
+            ],
+            "section": "Сбер в цифрах и фактах/Ключевые финансовые результаты"
+          },
+          {
+            "id": "retail_loans_2023",
+            "any_of": [
+              "sber_2023:00569:c0:ad35e78af9aa",
+              "sber_2023:00227:c0:1662185de5df"
+            ],
+            "section": "Сбер в цифрах и фактах/Ключевые финансовые результаты"
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 4,
+        "max_tool_calls": 6,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "корпоративн",
+          "розничн",
+          "re:23[.,]3",
+          "re:16[.,]1"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "Отчёт за 2023 год, стр. 20: 23,3 трлн руб. (+25,2%) и 16,1 трлн руб. (+29,3%)."
+    },
+    {
+      "id": "medium_007",
+      "suite": "medium",
+      "split": "dev",
+      "category": "multi_hop",
+      "difficulty": "medium",
+      "tags": [
+        "strategy",
+        "2017",
+        "2023"
+      ],
+      "question": "Как менялись стратегические приоритеты Сбербанка между отчётами за 2017 и 2023 годы?",
+      "filters": {
+        "years": [
+          2017,
+          2023
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "В 2017 году приоритетами были клиентский опыт, технологическое лидерство и экосистема; в 2023 году — человекоцентричная компания, ИИ нового поколения и цифровая трансформация.",
+      "expected": {
+        "required_facts": [],
+        "required_years": [
+          2017,
+          2023
+        ],
+        "required_documents": [
+          "sber_2017",
+          "sber_2023"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [
+          "приоритеты 2017",
+          "приоритеты 2023",
+          "изменение акцента"
+        ],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "strategy_2017",
+            "any_of": [
+              "sber_2017:00055:c3:468cb01058ec"
+            ],
+            "section": "Ограничение ответственности"
+          },
+          {
+            "id": "strategy_2026",
+            "any_of": [
+              "sber_2023:00585:c0:73c877d84551",
+              "sber_2023:00585:c1:f6a98a657490",
+              "sber_2023:00078:c7:0166ca347b6e"
+            ],
+            "section": "Сбер в цифрах и фактах/Долгосрочное видение и Стратегия 2026"
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 4,
+        "max_tool_calls": 6,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "стратег",
+          "технологическ",
+          "экосистем",
+          "re:(искусственн|\\bИИ\\b)"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "2017: стр. 4 — клиентский опыт, технологическое лидерство, экосистема. 2023: стр. 8 и 21 — человекоцентричность, ИИ, цифровая трансформация. Триаж full-run: gold группы 2023 расширена chunk'ом sber_2023:00585:c1 (та же страница 21 и тот же раздел «Стратегия 2026», продолжение списка приоритетов) — ответ может цитировать любой из двух фрагментов одного раздела; must_mention принимает «ИИ» как эквивалент «искусственного интеллекта»."
+    },
+    {
+      "id": "medium_008",
+      "suite": "medium",
+      "split": "dev",
+      "category": "fact_lookup",
+      "difficulty": "medium",
+      "tags": [
+        "numeric",
+        "2022",
+        "digital"
+      ],
+      "question": "Каких результатов достиг Сбер в цифровой трансформации бизнеса клиентов к концу 2022 года?",
+      "filters": {
+        "years": [
+          2022
+        ],
+        "allowed_doc_ids": [
+          "sber_2022"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "К концу 2022 года в портфеле было более 540 проектов цифровой трансформации клиентов и 139 партнёров-интеграторов.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "digital_transformation_projects",
+            "metric_aliases": [
+              "проекты цифровой трансформации",
+              "проектов цифровой трансформации"
+            ],
+            "year": 2022,
+            "value": 540,
+            "unit": "проектов",
+            "unit_aliases": [
+              "проектов",
+              "проекта",
+              "проект"
+            ],
+            "tolerance": 0.01
+          },
+          {
+            "metric": "digital_partners",
+            "metric_aliases": [
+              "партнёры",
+              "партнеры",
+              "интеграторы"
+            ],
+            "year": 2022,
+            "value": 139,
+            "unit": "партнёров",
+            "unit_aliases": [
+              "партнёров",
+              "партнеров",
+              "компаний"
+            ],
+            "tolerance": 0.01
+          }
+        ],
+        "required_years": [
+          2022
+        ],
+        "required_documents": [
+          "sber_2022"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [
+          "количество проектов",
+          "партнёрская сеть"
+        ],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "digital_projects_2022",
+            "any_of": [
+              "sber_2022:00873:c1:9f51c5e1fbc9"
+            ],
+            "section": "Экосистема В2В. Корпоративно-инвестиционный бизнес"
+          },
+          {
+            "id": "digital_partners_2022",
+            "any_of": [
+              "sber_2022:00873:c0:6495048b28ed"
+            ],
+            "section": "Экосистема В2В. Корпоративно-инвестиционный бизнес"
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 4,
+        "max_tool_calls": 6,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "цифров",
+          "re:540",
+          "re:139"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "Отчёт за 2022 год, стр. 43: более 540 проектов цифровой трансформации и 139 партнёров."
+    },
+    {
+      "id": "medium_009",
+      "suite": "medium",
+      "split": "holdout",
+      "category": "fact_lookup",
+      "difficulty": "medium",
+      "tags": [
+        "holdout",
+        "numeric",
+        "platform_v",
+        "2023"
+      ],
+      "question": "Какой эффект дала платформа Platform V, по данным отчёта за 2023 год?",
+      "filters": {
+        "years": [
+          2023
+        ],
+        "allowed_doc_ids": [
+          "sber_2023"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "Эффект от Platform V оценивается примерно в 800 млрд руб.; платформа названа лучшей для импортозамещения.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "platform_v_effect",
+            "metric_aliases": [
+              "platform v",
+              "эффект",
+              "импортозамещение"
+            ],
+            "year": 2023,
+            "value": 800,
+            "unit": "млрд руб.",
+            "unit_aliases": [
+              "млрд рублей",
+              "млрд руб",
+              "млрд RUB"
+            ],
+            "tolerance": 0.01
+          }
+        ],
+        "required_years": [
+          2023
+        ],
+        "required_documents": [
+          "sber_2023"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [
+          "значение эффекта",
+          "единица измерения"
+        ],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "platform_v_effect",
+            "any_of": [
+              "sber_2023:00136:c1:3335c25de148"
+            ],
+            "section": "Сбер в цифрах и фактах/Культура выполнения ключевых стратегических целей"
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 4,
+        "max_tool_calls": 6,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "platform v",
+          "re:800"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "Отчёт за 2023 год, стр. 12: эффект 800 млрд руб. за трёхлетний период. Holdout."
+    },
+    {
+      "id": "medium_010",
+      "suite": "medium",
+      "split": "holdout",
+      "category": "fact_lookup",
+      "difficulty": "medium",
+      "tags": [
+        "holdout",
+        "numeric",
+        "2023",
+        "market_share"
+      ],
+      "question": "Какие доли на российском рынке кредитования корпоративных и частных клиентов занимал Сбер в 2023 году?",
+      "filters": {
+        "years": [
+          2023
+        ],
+        "allowed_doc_ids": [
+          "sber_2023"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "Доля на рынке кредитования корпоративных клиентов — 32,3%, частных клиентов — 47,7%.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "corporate_market_share",
+            "metric_aliases": [
+              "доля на рынке",
+              "корпоративные клиенты"
+            ],
+            "year": 2023,
+            "value": 32.3,
+            "unit": "%",
+            "unit_aliases": [
+              "процент",
+              "процентов"
+            ],
+            "tolerance": 0.01
+          },
+          {
+            "metric": "retail_market_share",
+            "metric_aliases": [
+              "доля на рынке",
+              "частные клиенты"
+            ],
+            "year": 2023,
+            "value": 47.7,
+            "unit": "%",
+            "unit_aliases": [
+              "процент",
+              "процентов"
+            ],
+            "tolerance": 0.01
+          }
+        ],
+        "required_years": [
+          2023
+        ],
+        "required_documents": [
+          "sber_2023"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [
+          "доля по корпоративным клиентам",
+          "доля по частным клиентам"
+        ],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "market_shares_2023",
+            "any_of": [
+              "sber_2023:00064:c3:401125c80cc9"
+            ],
+            "section": "Обращение к акционерам"
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 4,
+        "max_tool_calls": 6,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "доля",
+          "re:32[.,]3",
+          "re:47[.,]7"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "Отчёт за 2023 год, стр. 7: доли 32,3% и 47,7%. Вопрос уточнён до корпоративных и частных клиентов: без этого он допускал и другие рыночные доли из того же отчёта (например, 48,5% розничного кредитования по данным Банка России). Holdout."
+    }
+  ]
+}

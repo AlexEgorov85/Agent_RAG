@@ -1,7 +1,15 @@
 # Спецификация Benchmark / Evaluation Framework Agent_RAG
 
 **Версия:** 1.1
-**Статус:** целевой контракт; benchmark-контур ещё не реализован.
+**Статус:** целевой контракт; инфраструктура benchmark реализована
+(`eval/`: dataset validation, metrics, runner, report, trace, evaluators,
+judge-интерфейс). Датасет полный: 30 тестов (10/10/5/5), 12 smoke и 6 holdout;
+`expected_corpus_sha256` зафиксирован для dev-корпуса. Реальный smoke — 12/12;
+последний полный прогон — 23/30 (`pass_rate 0.767`, Recall@5 0.889), предыдущий
+— 24/30. Judge не калиброван и по умолчанию выключен. Benchmark на полном
+корпусе 9 PDF не проведён; holdout пересекается с dev по gold-чанкам в 4 тестах
+(`holdout_gold_overlap`), а `context_chunk_ids` доступны не для всех кейсов.
+
 **Ревизия 1.1:** устранён конфликт Streamlit/React, добавлена идентичность
 `test_id + retrieval_mode + attempt_index`, разделены статусы, закреплена версия
 корпуса, уточнены сопоставимость, denominator и контракт `diagnostics`.
@@ -476,8 +484,10 @@ agent-level тест провален, и для проверки режимов
 | hard | 5 | 8 |
 | multi_turn (на turn) | 3 | 6 |
 
-Defaults не могут превышать системные лимиты (`MAX_SEARCH_CALLS=5`,
-`MAX_TOOL_CALLS=8` в текущем коде; при изменении констант таблица обновляется).
+Defaults — это мягкие верхние границы ожидаемого поведения в тесте, а не
+конфигурация сервиса: они не поднимают системный потолок (`MAX_SEARCH_CALLS=2`,
+`MAX_TOOL_CALLS=4` в текущем коде). Если тест требует больше, он всё равно
+получит `tool_budget_exhausted` от агента.
 При `strict_search_budget=false` превышение даёт warning `excess_search_calls`;
 при `true` — провал теста.
 
@@ -2072,14 +2082,15 @@ SHA и конфиг агента сравнение не блокируют.
 |---|---|---|---|
 | Dataset schema | поля, уникальность, holdout, null, chunk_id | `tests/test_eval_dataset.py` | да |
 | Metrics | Recall@k, MRR, Coverage, alternative groups | `tests/test_eval_metrics.py` | да |
-| Trace | нормализация, stage lists, redaction, truncation | `tests/test_eval_trace.py` | да |
-| Answer | факты, годы, citations, расчёты, critical errors | `tests/test_eval_answer.py` | да |
-| Dialogue | контекст, correction, contradiction, cascade | `tests/test_eval_dialogue.py` | да |
+| Trace | нормализация, stage lists, redaction, truncation | `tests/test_eval_runner.py`, `tests/test_trace_stages.py` | да |
+| Answer | факты, годы, citations, расчёты, critical errors | `tests/test_eval_runner.py` (offline evaluators) | да |
+| Dialogue | контекст, correction, contradiction, cascade | `tests/test_eval_runner.py` | да |
 | Runner | smoke на fake AgentService, артефакты, coverage | `tests/test_eval_runner.py` | да |
-| Result identity | режимы, attempts, имена trace, `cases.jsonl` | `tests/test_eval_results.py` | да |
-| Cross-process lock | CLI + API не вызывают LLM одновременно | `tests/eval/test_llm_lock.py` | да |
+| Result identity | режимы, attempts, имена trace, `cases.jsonl` | `tests/test_eval_runner.py` | да |
+| Cross-process lock | CLI + API не вызывают LLM одновременно | `tests/test_llm_lock.py`, `tests/test_api_execution.py` | да |
 | Report | HTML/MD, summary, compare, пустые значения | `tests/test_eval_report.py` | да |
-| Agent diagnostics | `AgentRunResult.diagnostics` не ломает старые тесты | `tests/test_agent_service.py` | да |
+| Agent diagnostics | `AgentRunResult.diagnostics` не ломает старые тесты | `tests/test_service_diagnostics.py`, `tests/test_agent_service.py` | да |
+| API evaluation | suites/runs/tests/trace/compare/cancel | `tests/test_web_api_evaluation.py` (20 тестов) | да |
 | Live smoke | реальный `AgentService`, 12 тестов | `eval.runner --suite smoke` | нет (manual/nightly) |
 | Live full | 30 тестов + holdout | `eval.runner --suite full` | нет (перед релизом) |
 
@@ -2105,37 +2116,42 @@ Live-прогоны не входят в обычный `pytest`.
 
 ## 13. Definition of Done
 
-- [ ] 30 эталонных тестов с проверенными facts/gold evidence; 6 holdout, 12 smoke.
-- [ ] Валидатор датасета проходит; `null`/фантазийные chunk_id запрещены;
+- [x] 30 эталонных тестов с проверенными facts/gold evidence; 6 holdout, 12 smoke.
+- [x] Валидатор датасета проходит; `null`/фантазийные chunk_id запрещены;
   `expected_corpus_sha256` закреплён и проверяется.
-- [ ] Runner запускает реальный `AgentService` и сохраняет trace.
-- [ ] Trace содержит query plan, search calls, этапы dense/BM25/RRF/rerank/context,
+- [x] Runner запускает реальный `AgentService` и сохраняет trace.
+- [x] Trace содержит query plan, search calls, этапы dense/BM25/RRF/rerank/context,
   evidence и ответ без секретов и chain-of-thought.
-- [ ] `AgentRunResult.diagnostics` — единый контейнер; недоступные данные дают
+- [x] `AgentRunResult.diagnostics` — единый контейнер; недоступные данные дают
   `null`/`not_measured`, а не синтетические значения.
-- [ ] Результаты различаются по `(test_id, retrieval_mode, attempt_index)`; trace-файлы
+- [x] Результаты различаются по `(test_id, retrieval_mode, attempt_index)`; trace-файлы
   не перезаписывают друг друга при `--retrieval-mode all`.
-- [ ] Статусы Agent execution, Answer, Test result и Evaluation run разделены;
+- [x] Статусы Agent execution, Answer, Test result и Evaluation run разделены;
   `abstained` не считается ошибкой выполнения.
-- [ ] `pass_rate` считается по eligible-тестам, `execution_coverage` показывается
+- [x] `pass_rate` считается по eligible-тестам, `execution_coverage` показывается
   рядом; пропуски и ошибки не маскируются.
-- [ ] Retrieval/Answer/Dialogue evaluators работают и покрыты offline-тестами.
-- [ ] Critical errors отделены от rubric score.
-- [ ] Multi-turn сценарии сохраняют контекст, correction и contradiction проверяются.
-- [ ] `summary.json`, `cases.jsonl`, `traces/`, `report.html`, `report.md` создаются
-  одним прогоном.
-- [ ] `--compare` показывает дельты и не сравнивает разные датасеты/корпуса как
+- [x] Retrieval/Answer/Dialogue evaluators работают и покрыты offline-тестами.
+- [x] Critical errors отделены от rubric score.
+- [x] Multi-turn сценарии сохраняют контекст, correction и contradiction проверяются.
+- [x] `summary.json`, `cases.jsonl`, `traces/`, `retrieval.csv`, `report.html`,
+  `report.md`, `manual_review.json` создаются одним прогоном.
+- [x] `--compare` показывает дельты и не сравнивает разные датасеты/корпуса как
   регрессию.
-- [ ] Ошибки, таймауты и `unsupported_mode` видны в coverage, не равны нулю.
-- [ ] CLI и API сериализуют LLM через общий межпроцессный lock; параллельный вызов
+- [x] Ошибки, таймауты и `unsupported_mode` видны в coverage, не равны нулю.
+- [x] CLI и API сериализуют LLM через общий межпроцессный lock; параллельный вызов
   невозможен.
-- [ ] `must_use_tools` не подменяет оценку evidence: strict только там, где это смысл
+- [x] `must_use_tools` не подменяет оценку evidence: strict только там, где это смысл
   сценария.
-- [ ] Benchmark не меняет рабочую логику Agent_RAG; старые тесты проходят.
-- [ ] README содержит команды validate/smoke/full/report/compare.
-- [ ] В артефактах нет ключей, полного prompt и полного текста корпуса.
-- [ ] WebUI-раздел Evaluation принимается отдельно по `docs/specs/evaluation-webui.md`;
+- [x] Benchmark не меняет рабочую логику Agent_RAG; старые тесты проходят.
+- [x] README содержит команды validate/smoke/full/report/compare.
+- [x] В артефактах нет ключей, полного prompt и полного текста корпуса.
+- [x] WebUI-раздел Evaluation принимается отдельно по `docs/specs/evaluation-webui.md`;
   core benchmark не зависит от наличия UI.
+
+Открытые ограничения (не блокируют DoD инфраструктуры, но влияют на выводы):
+judge не калиброван; holdout пересекается с dev (`holdout_gold_overlap`);
+`context_chunk_ids` доступны не для всех кейсов; benchmark на полном корпусе
+9 PDF не проведён.
 
 ## 14. Что сознательно не делается
 
@@ -2152,9 +2168,11 @@ Live-прогоны не входят в обычный `pytest`.
 
 ## 15. Главный критерий
 
-Рекомендуемый старт — 30 эталонных тестов, четыре независимые группы оценок и один
+Старт выполнен: 30 эталонных тестов, четыре независимые группы оценок и один
 Python-runner. Расширение до 50+ тестов и дополнительные evaluator'ы добавляются
-только после фиксации первого baseline.
+только после фиксации первого baseline; сейчас baseline на dev-корпусе — 23/30
+(предыдущий — 24/30), поэтому сначала нужно стабилизировать качество и убрать
+пересечение holdout с dev.
 
 Benchmark считается полезным, если после изменения retrieval, reranker, ActionSelector
 или prompt можно ответить на три вопроса:

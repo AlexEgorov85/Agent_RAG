@@ -27,13 +27,34 @@ RRF, хотя чанк не проходил через RRF.
 деградирует до предупреждения. В этом случае возвращается только базовый
 результат, что соответствует fallback из спеки: «нет графового индекса →
 гибридный поиск без графа».
+
+Трейс (``spec_benchmark.md`` §4.3) дополняется этапом ``graph``:
+
+* ``stages["graph"]`` — ``chunk_id``, ``rank``, ``score`` (графовый скор),
+  ``path``, ``evidence_chunk_ids`` и ``matched_entities``; дубликаты
+  схлопываются по ``chunk_id``, ранги начинаются с 1;
+* ``available["graph"]``/``unavailable["graph"]`` — этап либо измерен, либо
+  недоступен с причиной: ``no_index``, ``disabled``, ``mode_not_supported``,
+  ``graph_failed``, ``no_candidates``;
+* счётчики ``graph_candidates``, ``graph_added`` (и ``graph_added_chunk_ids``),
+  ``graph_duplicates``, ``graph_matched_entities``, ``graph_failed``.
+
+Provenance свидетельств разделено явно: ``evidence_manifest(result)``
+возвращает только чанки, подтверждённые базовым поиском (primary). Графовый
+чанк, которого не было в базовой выдаче, попадает в
+``graph_evidence_manifest(result)``; его можно цитировать только после
+получения через поиск/``get_chunk`` (P7). ``graph_added=0`` — валидный
+результат, а не ошибка.
+
+Граф работает только поверх ``retrieval_mode="hybrid"``: в ``dense``/``keyword``
+этап отключается с предупреждением ``mode_not_supported``.
 """
 
 from __future__ import annotations
 
 import inspect
 import math
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, fields, replace
 from typing import Any
 
@@ -143,6 +164,9 @@ class GraphRetrievalTrace(RetrievalTrace):
 
     Класс наследуется от :class:`RetrievalTrace`, поэтому совместим со всеми
     потребителями, которые читают только базовые счётчики и флаги сбоев.
+    Новые поля не дублируют базовые: ``graph_added_chunk_ids`` хранит сами
+    идентификаторы добавленных графовых чанков (для provenance), тогда как
+    ``graph_added`` остаётся счётчиком.
     """
 
     graph_matched_entities: list[str] = field(default_factory=list)
@@ -155,22 +179,94 @@ class GraphRetrievalTrace(RetrievalTrace):
     graph_error_type: str | None = None
     graph_depth: int = 0
     graph_results: list[dict[str, Any]] = field(default_factory=list)
+    graph_added_chunk_ids: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Добавляет к общему trace графовые счётчики и provenance.
+
+        ``counts["graph"]`` — число графовых кандидатов; отдельный блок
+        ``graph`` агрегирует диагностику, которую читают UI/benchmark
+        (``graph_added``, matched entities, добавленные ``chunk_id``).
+        """
+        data = super().to_dict()
+        data["counts"]["graph"] = self.graph_candidates
+        data["graph"] = {
+            "candidates": self.graph_candidates,
+            "added": self.graph_added,
+            "added_chunk_ids": list(self.graph_added_chunk_ids),
+            "duplicates": self.graph_duplicates,
+            "skipped_missing_chunks": self.graph_skipped_missing_chunks,
+            "skipped_filtered": self.graph_skipped_filtered,
+            "failed": self.graph_failed,
+            "error_type": self.graph_error_type,
+            "depth": self.graph_depth,
+            "matched_entities": list(self.graph_matched_entities),
+        }
+        return data
+
+
+#: Причины, по которым этап ``graph`` не измерен (``available=False``).
+GRAPH_UNAVAILABLE_HINTS: dict[str, str] = {
+    "no_index": "graph index/artifact is absent; using hybrid retrieval only",
+    "disabled": "graph augmentation is disabled (graph_max_results=0)",
+    "mode_not_supported": (
+        "graph runs only over the hybrid base; dense/keyword disable it"
+    ),
+    "graph_failed": "graph backend failed; using the hybrid result",
+    "no_candidates": "graph found no evidence chunks; using the hybrid result",
+}
+
+
+def graph_unavailable_warning(reason: str, *, error_type: str | None = None) -> str:
+    """Собирает единое предупреждение ``graph_unavailable: <reason>``."""
+    hint = GRAPH_UNAVAILABLE_HINTS.get(reason, "graph stage is unavailable")
+    detail = f"; {error_type}" if error_type else ""
+    return f"graph_unavailable: {reason} ({hint}{detail})"
 
 
 def _copy_trace(base_trace: Any) -> GraphRetrievalTrace:
-    """Копирует объявленные поля базового трейса в графовый."""
+    """Копирует объявленные поля базового трейса в графовый.
+
+    Словари этапов/доступности копируются отдельно: иначе запись этапа
+    ``graph`` изменила бы базовый trace, который может переиспользоваться
+    вызывающим кодом.
+    """
+    trace = GraphRetrievalTrace()
+    if base_trace is None:
+        return trace
+    for item in fields(RetrievalTrace):
+        if hasattr(base_trace, item.name):
+            setattr(trace, item.name, getattr(base_trace, item.name))
     if isinstance(base_trace, GraphRetrievalTrace):
-        values = {
-            item.name: getattr(base_trace, item.name)
-            for item in fields(GraphRetrievalTrace)
-        }
-        return GraphRetrievalTrace(**values)
-    values: dict[str, Any] = {}
-    if base_trace is not None:
-        for item in fields(RetrievalTrace):
-            if hasattr(base_trace, item.name):
-                values[item.name] = getattr(base_trace, item.name)
-    return GraphRetrievalTrace(**values)
+        for item in fields(GraphRetrievalTrace):
+            setattr(trace, item.name, getattr(base_trace, item.name))
+    trace.stages = {
+        name: None if items is None else [dict(entry) for entry in items]
+        for name, items in (trace.stages or {}).items()
+    }
+    trace.available = dict(trace.available or {})
+    trace.fallback = dict(trace.fallback or {})
+    trace.unavailable = dict(trace.unavailable or {})
+    trace.graph_matched_entities = list(trace.graph_matched_entities or [])
+    trace.graph_results = [dict(item) for item in (trace.graph_results or [])]
+    trace.graph_added_chunk_ids = list(trace.graph_added_chunk_ids or [])
+    return trace
+
+
+def _accepts_keyword(target: Any, keyword: str) -> bool:
+    """Проверяет, принимает ли ``target`` именованный аргумент ``keyword``."""
+    try:
+        parameters = inspect.signature(target).parameters
+    except (TypeError, ValueError):
+        return False
+    return any(
+        item.kind == inspect.Parameter.VAR_KEYWORD
+        or (
+            item.name == keyword
+            and item.kind != inspect.Parameter.POSITIONAL_ONLY
+        )
+        for item in parameters.values()
+    )
 
 
 def _result_field(result: Any, name: str, default: Any = None) -> Any:
@@ -188,6 +284,18 @@ def _base_hits(result: Any) -> list[RetrievalHit]:
     if raw is None:
         raise TypeError("base.retrieve() must return hits or a RetrievalResult")
     return [_as_hit(item) for item in raw]
+
+
+def _unique_hits(hits: Iterable[RetrievalHit]) -> list[RetrievalHit]:
+    """Схлопывает свидетельства по ``chunk_id``, сохраняя первое вхождение."""
+    seen: set[str] = set()
+    unique: list[RetrievalHit] = []
+    for hit in hits:
+        if hit.chunk_id in seen:
+            continue
+        seen.add(hit.chunk_id)
+        unique.append(hit)
+    return unique
 
 
 def _as_hit(item: Any) -> RetrievalHit:
@@ -264,6 +372,16 @@ def _passes_extra_filters(chunk: Mapping[str, Any], filters: SearchFilters) -> b
     return True
 
 
+def _distinct_chunk_values(hits: Iterable[RetrievalHit], name: str) -> int:
+    """Число различных непустых значений поля чанка в финальной выдаче."""
+    values = {
+        _field(hit.chunk, name)
+        for hit in hits
+        if isinstance(hit.chunk, Mapping)
+    }
+    return len({value for value in values if value is not None})
+
+
 def _graph_score(item: GraphRetrievalResult) -> float:
     """Возвращает конечную графовую оценку; некорректные значения уходят в конец."""
     try:
@@ -303,6 +421,8 @@ class GraphAugmentedRetriever:
         base: Объект с ``retrieve(query, filters=..., top_k=...)``, возвращающий
             ``RetrievalResult`` (или совместимый объект с ``hits``).
         graph: ``networkx.MultiDiGraph`` из ``src.graph.graph_builder``.
+            ``None`` или пустой граф эквивалентны отсутствию graph-индекса:
+            возвращается базовый результат с ``unavailable["graph"]="no_index"``.
         chunk_store: Отображение ``chunk_id -> словарь чанка`` для материализации
             графовых свидетельств. Отсутствующие ID пропускаются, не выдумываются.
         entity_matcher: Необязательный callable ``(query, graph) -> entity IDs`` или
@@ -332,8 +452,8 @@ class GraphAugmentedRetriever:
     def __init__(
         self,
         base: Any,
-        graph: nx.MultiDiGraph,
-        chunk_store: Mapping[str, Mapping[str, Any]],
+        graph: nx.MultiDiGraph | None,
+        chunk_store: Mapping[str, Mapping[str, Any]] | None,
         *,
         entity_matcher: EntityMatcher | None = None,
         graph_depth: int = 2,
@@ -394,6 +514,48 @@ class GraphAugmentedRetriever:
             self.base_candidate_k = self.max_candidates if reranker is not None else 0
         else:
             self.base_candidate_k = int(base_candidate_k)
+        base_retrieve = getattr(base, "retrieve", None)
+        self._base_accepts_mode = _accepts_keyword(base_retrieve, "retrieval_mode")
+        self._base_accepts_queries = _accepts_keyword(base_retrieve, "queries")
+
+    def _graph_is_empty(self) -> bool:
+        """Отличает отсутствующий/пустой граф от сломанного backend'а."""
+        if self.graph is None:
+            return True
+        try:
+            return self.graph.number_of_nodes() == 0
+        except Exception:  # noqa: BLE001 — объект может не быть графом вовсе
+            return False
+
+    def _graph_unavailable_reason(self, retrieval_mode: str) -> str | None:
+        """Возвращает причину отключения графа до его вызова, если она есть."""
+        if retrieval_mode != "hybrid":
+            # Граф добавляет свидетельства только к гибридной базе.
+            return "mode_not_supported"
+        if self.graph_max_results == 0:
+            return "disabled"
+        if self._graph_is_empty():
+            return "no_index"
+        return None
+
+    def _retrieve_base(
+        self,
+        query: str,
+        *,
+        filters: SearchFilters | None,
+        top_k: int | None,
+        retrieval_mode: str,
+        queries: Sequence[str] | None,
+    ) -> Any:
+        """Вызывает базовый поиск, пробрасывая только поддерживаемые аргументы."""
+        kwargs: dict[str, Any] = {"filters": filters}
+        if top_k is not None:
+            kwargs["top_k"] = top_k
+        if self._base_accepts_mode:
+            kwargs["retrieval_mode"] = retrieval_mode
+        if queries and self._base_accepts_queries:
+            kwargs["queries"] = list(queries)
+        return self.base.retrieve(query, **kwargs)
 
     def _match_entity_ids(self, query: str) -> list[str]:
         """Разрешает упоминания запроса в существующие ID узлов-сущностей."""
@@ -460,6 +622,56 @@ class GraphAugmentedRetriever:
             }
             for item in results
         ]
+
+    @staticmethod
+    def _graph_stage_entries(
+        results: Iterable[GraphRetrievalResult],
+    ) -> list[dict[str, Any]]:
+        """Собирает этап ``graph``: лучший скор на ``chunk_id`` и путь-объяснение.
+
+        ``record_stage`` из базового trace оставляет только ``chunk_id/rank/score``,
+        поэтому этап публикуется здесь же: для graph важны ``path`` и
+        ``evidence_chunk_ids`` (``spec_benchmark.md`` §4.3).
+        """
+        entries: dict[str, dict[str, Any]] = {}
+        first_seen: dict[str, int] = {}
+        for position, item in enumerate(results):
+            chunk_id = str(getattr(item, "chunk_id", "") or "")
+            if not chunk_id:
+                continue
+            score = _graph_score(item)
+            if chunk_id not in entries:
+                first_seen[chunk_id] = position
+                entries[chunk_id] = {
+                    "chunk_id": chunk_id,
+                    "rank": position + 1,
+                    "score": score,
+                    "path": list(item.path),
+                    "evidence_chunk_ids": list(item.evidence_chunk_ids),
+                    "matched_entities": list(item.matched_entities),
+                }
+            elif score > entries[chunk_id]["score"]:
+                entries[chunk_id]["score"] = score
+                entries[chunk_id]["path"] = list(item.path)
+                entries[chunk_id]["evidence_chunk_ids"] = list(
+                    item.evidence_chunk_ids)
+        ordered = sorted(
+            entries.values(),
+            key=lambda entry: (-entry["score"], first_seen[entry["chunk_id"]]),
+        )
+        for rank, entry in enumerate(ordered, start=1):
+            entry["rank"] = rank
+        return ordered
+
+    def _publish_graph_stage(
+        self,
+        trace: GraphRetrievalTrace,
+        results: Iterable[GraphRetrievalResult],
+    ) -> None:
+        """Помечает этап ``graph`` измеренным (возможно, с пустым списком)."""
+        trace.stages["graph"] = self._graph_stage_entries(results)
+        trace.available["graph"] = True
+        trace.unavailable.pop("graph", None)
 
     @staticmethod
     def _candidate_pool(
@@ -543,10 +755,20 @@ class GraphAugmentedRetriever:
         *,
         filters: SearchFilters | None = None,
         top_k: int | None = None,
+        retrieval_mode: str = "hybrid",
+        queries: Sequence[str] | None = None,
     ) -> RetrievalResult:
-        """Возвращает базовые хиты, за которыми идут новые графовые чанки-свидетельства."""
+        """Возвращает базовые хиты, за которыми идут новые графовые чанки-свидетельства.
+
+        ``retrieval_mode``/``queries`` пробрасываются в базовый retriever, если
+        он их поддерживает. Граф работает только поверх ``hybrid``: в
+        ``dense``/``keyword`` этап отключается с ``mode_not_supported``.
+        Любой сбой графа деградирует до базового результата, не роняя поиск.
+        """
         if top_k is not None and (isinstance(top_k, bool) or top_k < 0):
             raise ValueError("top_k must be a non-negative integer")
+        if retrieval_mode not in {"hybrid", "dense", "keyword"}:
+            raise ValueError("invalid retrieval_mode")
 
         # В режиме важности запрашиваем у базы более широкий пул, чтобы решали
         # реранкер и бюджет токенов, а не произвольное фиксированное число.
@@ -556,11 +778,20 @@ class GraphAugmentedRetriever:
                 int(top_k) if top_k is not None else 0,
                 self.base_candidate_k,
             )
-        base_result = self.base.retrieve(query, filters=filters, top_k=base_top_k)
-        hits = _base_hits(base_result)
+        base_result = self._retrieve_base(
+            query,
+            filters=filters,
+            top_k=base_top_k,
+            retrieval_mode=retrieval_mode,
+            queries=queries,
+        )
+        hits = _unique_hits(_base_hits(base_result))
         warnings = list(_result_field(base_result, "warnings") or [])
         missing_years = list(_result_field(base_result, "missing_years") or [])
         trace = _copy_trace(_result_field(base_result, "trace"))
+        # Режим запроса — это то, что просил вызывающий; baseline мог его не
+        # поддерживать, но graph-этап отключается именно по запрошенному режиму.
+        trace.retrieval_mode = retrieval_mode
 
         effective = filters if isinstance(filters, SearchFilters) else _result_field(
             base_result, "effective_filters")
@@ -569,49 +800,62 @@ class GraphAugmentedRetriever:
 
         base_ids = {hit.chunk_id for hit in hits}
         graph_only: list[RetrievalHit] = []
-        try:
-            trace.graph_depth = self.graph_depth
-            entity_ids = self._match_entity_ids(query)
-            trace.graph_matched_entities = list(entity_ids)
-            graph_results: list[GraphRetrievalResult] = []
-            if entity_ids:
-                graph_results = list(retrieve_graph(
-                    self.graph,
-                    entity_ids,
-                    doc_ids=effective.allowed_doc_ids,
-                    years=effective.requested_years() or None,
-                    issuers=effective.issuers,
-                    section_path=effective.section_path_prefix,
-                    max_depth=self.graph_depth,
-                    max_results=self.graph_max_results,
-                    include_relation_evidence=self.include_relation_evidence,
-                ))
-            trace.graph_candidates = len(graph_results)
-            trace.graph_results = self._diagnostics(graph_results)
+        unavailable_reason = self._graph_unavailable_reason(retrieval_mode)
+        if unavailable_reason is not None:
+            trace.mark_unavailable("graph", unavailable_reason)
+            warnings.append(graph_unavailable_warning(unavailable_reason))
+        else:
+            try:
+                trace.graph_depth = self.graph_depth
+                entity_ids = self._match_entity_ids(query)
+                trace.graph_matched_entities = list(entity_ids)
+                graph_results: list[GraphRetrievalResult] = []
+                if entity_ids:
+                    graph_results = list(retrieve_graph(
+                        self.graph,
+                        entity_ids,
+                        doc_ids=effective.allowed_doc_ids,
+                        years=effective.requested_years() or None,
+                        issuers=effective.issuers,
+                        section_path=effective.section_path_prefix,
+                        max_depth=self.graph_depth,
+                        max_results=self.graph_max_results,
+                        include_relation_evidence=self.include_relation_evidence,
+                    ))
+                trace.graph_candidates = len(graph_results)
+                trace.graph_results = self._diagnostics(graph_results)
+                if graph_results:
+                    self._publish_graph_stage(trace, graph_results)
+                else:
+                    # Нет кандидатов — это не измеренный «0 результатов», а
+                    # отсутствие graph-свидетельств для данного запроса.
+                    trace.mark_unavailable("graph", "no_candidates")
 
-            loaded = self._load_evidence(graph_results, effective, trace)
-            for rank, (item, chunk) in enumerate(loaded, start=1):
-                if item.chunk_id in base_ids:
-                    trace.graph_duplicates += 1
-                    continue
-                graph_only.append(RetrievalHit(
-                    chunk_id=item.chunk_id,
-                    chunk=chunk,
-                    rrf_score=self.graph_weight / (RRF_CONSTANT + rank),
-                    rerank_score=None,
-                    rerank_rank=None,
-                ))
-        except Exception as exc:  # noqa: BLE001 - graph must never block baseline
-            trace.graph_failed = True
-            trace.graph_error_type = type(exc).__name__
-            trace.graph_candidates = 0
-            trace.graph_results = []
-            graph_only = []
-            warnings.append("graph_candidates=0")
-            warnings.append(
-                "Graph retrieval unavailable; using base retrieval only "
-                f"({trace.graph_error_type})"
-            )
+                loaded = self._load_evidence(graph_results, effective, trace)
+                for rank, (item, chunk) in enumerate(loaded, start=1):
+                    if item.chunk_id in base_ids:
+                        trace.graph_duplicates += 1
+                        continue
+                    graph_only.append(RetrievalHit(
+                        chunk_id=item.chunk_id,
+                        chunk=chunk,
+                        rrf_score=self.graph_weight / (RRF_CONSTANT + rank),
+                        rerank_score=None,
+                        rerank_rank=None,
+                    ))
+            except Exception as exc:  # noqa: BLE001 - graph must never block baseline
+                trace.graph_failed = True
+                trace.graph_error_type = type(exc).__name__
+                trace.graph_candidates = 0
+                trace.graph_results = []
+                graph_only = []
+                trace.mark_unavailable("graph", "graph_failed")
+                warnings.append("graph_candidates=0")
+                warnings.append(graph_unavailable_warning(
+                    "graph_failed", error_type=trace.graph_error_type))
+
+        # fallback["graph"] фиксирует, что результат собран без graph-этапа.
+        trace.fallback["graph"] = not trace.is_stage_available("graph")
 
         merged = list(hits) + graph_only
         graph_only_ids = {hit.chunk_id for hit in graph_only}
@@ -651,10 +895,28 @@ class GraphAugmentedRetriever:
 
         if top_k is not None:
             merged = merged[:int(top_k)]
-        trace.graph_added = sum(
-            1 for hit in merged if hit.chunk_id in graph_only_ids
-        )
+        merged = _unique_hits(merged)
+        trace.graph_added_chunk_ids = [
+            hit.chunk_id for hit in merged if hit.chunk_id in graph_only_ids
+        ]
+        trace.graph_added = len(trace.graph_added_chunk_ids)
         trace.returned = len(merged)
+        # Обёртка меняет финальный top-k, поэтому этап „returned“ и
+        # разнообразие пересчитываются по фактическому результату.
+        trace.stages["returned"] = [
+            {
+                "chunk_id": hit.chunk_id,
+                "rank": position,
+                "score": (hit.rerank_score if hit.rerank_score is not None
+                          else hit.rrf_score),
+            }
+            for position, hit in enumerate(merged, start=1)
+        ]
+        trace.available["returned"] = True
+        trace.unavailable.pop("returned", None)
+        trace.distinct_docs = _distinct_chunk_values(merged, "doc_id")
+        trace.distinct_sections = _distinct_chunk_values(merged, "section_path")
+        trace.distinct_years = _distinct_chunk_values(merged, "year")
 
         if not trace.graph_failed:
             warnings.append(f"graph_candidates={trace.graph_candidates}")
@@ -680,3 +942,46 @@ class GraphAugmentedRetriever:
             effective_filters=effective,
             trace=trace,
         )
+
+    # --- provenance -------------------------------------------------------
+    #
+    # ``retrieve`` возвращает graph-кандидатов вместе с базовыми хитами, но
+    # итоговый evidence manifest должен содержать только подтверждённые
+    # primary чанки. Графовый чанк, которого не было в базовой выдаче, живёт
+    # в ``graph_evidence_manifest`` до получения через поиск/``get_chunk``
+    # (P7, AC-P7-3/AC-P7-4).
+
+    @staticmethod
+    def _graph_only_ids(result: Any) -> set[str]:
+        """ID графовых чанков, вошедших в результат помимо базовой выдачи."""
+        values = getattr(_result_field(result, "trace"),
+                         "graph_added_chunk_ids", None)
+        if not isinstance(values, (list, tuple, set, frozenset)):
+            return set()
+        return {str(value) for value in values if str(value)}
+
+    def primary_evidence_hits(self, result: Any) -> list[RetrievalHit]:
+        """Хиты, подтверждённые базовым поиском; их можно цитировать сразу."""
+        graph_only = self._graph_only_ids(result)
+        return [
+            hit for hit in _unique_hits(_base_hits(result))
+            if hit.chunk_id not in graph_only
+        ]
+
+    def graph_evidence_hits(self, result: Any) -> list[RetrievalHit]:
+        """Хиты, найденные только графом; цитировать можно после ``get_chunk``."""
+        graph_only = self._graph_only_ids(result)
+        if not graph_only:
+            return []
+        return [
+            hit for hit in _unique_hits(_base_hits(result))
+            if hit.chunk_id in graph_only
+        ]
+
+    def evidence_manifest(self, result: Any) -> list[str]:
+        """Evidence manifest из подтверждённых primary ``chunk_id`` без дублей."""
+        return [hit.chunk_id for hit in self.primary_evidence_hits(result)]
+
+    def graph_evidence_manifest(self, result: Any) -> list[str]:
+        """``chunk_id`` graph-only свидетельств, ожидающих подтверждения."""
+        return [hit.chunk_id for hit in self.graph_evidence_hits(result)]

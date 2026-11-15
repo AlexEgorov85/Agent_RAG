@@ -1,7 +1,16 @@
 # Спецификация агента и его WebUI
 
 **Версия:** 1.0
-**Статус:** целевой контракт; агент и WebUI ещё предстоит реализовать.
+**Статус:** целевой контракт. Backend-контур агента реализован (router/selector,
+CoverageReport, verification и repair, graph routing, temporal/structure analysis,
+calculations, retrieval fallback для structural-запросов, trace stages) и покрыт
+тестами. HTTP API и React WebUI этапов 1–4 реализованы, Evaluation API и
+React-раздел Evaluation работают, этап 5 закрыт частично. Реальная dev-приёмка —
+4/4 (снимок 02:44, после P1/P2 не перепрогонялась); последний полный benchmark —
+23/30 (`pass_rate 0.767`, Recall@5 0.889), предыдущий — 24/30
+(`pass_rate 0.8`) на dev-корпусе, поэтому качество агента ещё не соответствует
+целевым критериям и не переносится на полный корпус 9 PDF.
+
 **Связанные документы:** [spec_target.md](spec_target.md), [spec_retrieval_engine.md](spec_retrieval_engine.md), [spec_graph.md](spec_graph.md), [spec_ui_eval.md](spec_ui_eval.md), [spec_agent_enhancement.md](spec_agent_enhancement.md)
 
 ## 1. Назначение
@@ -150,6 +159,23 @@ reason_code: fact_lookup | clarify_structure | explore_entities | inspect_eviden
 - при отсутствии достаточного evidence отвечает `abstain`;
 - не показывает внутренние рассуждения модели или скрытый chain-of-thought.
 
+### 4.1. Служебные реплики вне корпуса
+
+Приветствие, благодарность, прощание и вопросы о возможностях ассистента
+(«Привет!», «Спасибо», «Что ещё умеешь?», «Кто ты?») обслуживаются отдельным
+узким детектором до роутера и retrieval (`src/agent/smalltalk.py`):
+
+- ответ возвращается как `Answer(status="answer")` без `citations`/`facts` и без
+  предупреждений; `run_completed` не содержит `analysis`, покрытия и verification;
+- ход не попадает в историю диалога, чтобы не вытеснять фактические turn'ы;
+- детектор срабатывает только на целиком служебную реплику без цифр и предметной
+  лексики: «Привет! Какая прибыль за 2023?» и «Что можешь сказать о рисках?»
+  уходят обычным RAG-маршрутом;
+- вопросы третьего лица о корпусе («Что умеет GigaChat?») не перехватываются.
+
+Это не ослабляет правило «только по источникам»: ответы о возможностях не
+содержат утверждений по документам.
+
 ## 5. События для streaming
 
 Backend публикует UI-safe события:
@@ -168,8 +194,10 @@ run_failed(error_code, user_message)
 
 События не содержат prompt целиком, секреты, полные внутренние рассуждения или полный
 корпусный текст. `short_arguments` очищаются от потенциально длинных/чувствительных
-значений. Для повторного подключения фронтенд может запросить итоговый state по
-`request_id`; гарантированная доставка каждого промежуточного события не требуется.
+значений. В текущей реализации `answer_delta` и `evidence_updated` не публикуются:
+`capabilities.token_streaming=false`, `incremental_evidence=false`. Для повторного
+подключения фронтенд может запросить итоговый state по `request_id`; гарантированная
+доставка каждого промежуточного события не требуется.
 
 ## 6. WebUI агента
 
@@ -178,7 +206,8 @@ run_failed(error_code, user_message)
 > Streamlit (`src/ui/app.py`) — legacy до этапа 5 миграции. Раздел Evaluation
 > описан в `docs/specs/evaluation-webui.md`, benchmark — в `spec_benchmark.md`.
 
-Текущий WebUI — Streamlit application; целевой интерфейс — React. Чат показывает:
+Реализованы оба клиента: Streamlit (`src/ui/app.py`, legacy до завершения
+этапа 5) и React WebUI (`frontend/`, целевой интерфейс). Чат показывает:
 
 - сообщения пользователя и финальный ответ агента;
 - этап обработки (анализ запроса, вызов поиска/структуры/графа, сбор evidence);

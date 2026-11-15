@@ -6,6 +6,7 @@ import json
 from types import SimpleNamespace
 
 from src.engine.generator import AnswerGenerator
+from src.engine.prompts import MAX_QUOTE_CHARS
 
 
 def make_response(content: str):
@@ -146,14 +147,14 @@ def test_citation_outside_manifest_is_dropped_documented_choice():
 
 def test_answer_with_only_outside_citations_retries_then_safe_abstain():
     payload = valid_payload(citations=[{"chunk_id": "outside", "quote": "invented"}])
-    client = FakeClient([make_response(payload), make_response(payload)])
+    client = FakeClient([make_response(payload), make_response(payload), make_response(payload)])
 
     answer = generator(client).generate("Прибыль?", make_evidence(), {"c1"})
 
     assert answer.status == "abstain"
     assert answer.citations == []
     assert answer.warnings == ["generation_unavailable"]
-    assert len(client.completions.calls) == 2
+    assert len(client.completions.calls) == 3
     assert "outside" not in answer.answer
     assert "invented" not in answer.answer
 
@@ -165,14 +166,14 @@ def test_abstain_must_have_empty_citations():
         citations=[{"chunk_id": "c1", "quote": "Чистая прибыль"}],
         facts=[],
     )
-    client = FakeClient([make_response(invalid), make_response(invalid)])
+    client = FakeClient([make_response(invalid), make_response(invalid), make_response(invalid)])
 
     answer = generator(client).generate("Прибыль?", make_evidence(), {"c1"})
 
     assert answer.status == "abstain"
     assert answer.citations == []
     assert answer.warnings == ["generation_unavailable"]
-    assert len(client.completions.calls) == 2
+    assert len(client.completions.calls) == 3
 
 
 def test_valid_abstain_keeps_safe_warning_code():
@@ -237,6 +238,7 @@ def test_retry_exhaustion_returns_safe_abstain_without_provider_text():
         [
             RuntimeError(f"{secret} {provider_body}"),
             RuntimeError(f"{secret} {provider_body}"),
+            RuntimeError(f"{secret} {provider_body}"),
         ]
     )
 
@@ -249,7 +251,7 @@ def test_retry_exhaustion_returns_safe_abstain_without_provider_text():
     assert secret not in visible
     assert "PROMPT" not in visible
     assert "provider body" not in visible
-    assert len(client.completions.calls) == 2
+    assert len(client.completions.calls) == 3
 
 
 def test_invalid_json_is_retried_then_succeeds():
@@ -265,14 +267,18 @@ def test_invalid_json_is_retried_then_succeeds():
 
 def test_invalid_json_and_schema_failures_exhaust_retries():
     client = FakeClient(
-        [make_response("not json"), make_response(json.dumps({"status": "maybe"}))]
+        [
+            make_response("not json"),
+            make_response(json.dumps({"status": "maybe"})),
+            make_response(json.dumps({"status": "maybe"})),
+        ]
     )
 
     answer = generator(client).generate("Прибыль?", make_evidence(), {"c1"})
 
     assert answer.status == "abstain"
     assert answer.warnings == ["generation_unavailable"]
-    assert len(client.completions.calls) == 2
+    assert len(client.completions.calls) == 3
 
 
 def test_max_retries_zero_means_one_attempt():
@@ -296,12 +302,26 @@ def test_model_warnings_are_allowlisted_and_cannot_leak_prompt_text():
     assert "secret" not in " ".join(answer.warnings)
 
 
-def test_repair_prompt_is_generic_and_does_not_echo_diagnostics():
+def test_repair_prompt_passes_codes_and_ids_but_not_free_text():
     client = FakeClient([make_response(valid_payload())])
     diagnostics = {
         "reason": "answer_schema_or_citation_validation_failed",
-        "invalid_citation_chunk_ids": ["provider-leak-marker"],
-        "evidence_chunk_count": 1,
+        "invalid_citation_chunk_ids": ["ghost_chunk_123", "not a valid id"],
+        "issues": [
+            {
+                "code": "fact_value_not_in_source",
+                "severity": "fatal",
+                "message": "LEAK-MESSAGE: содержимое чанка",
+                "chunk_ids": ["c1"],
+            },
+            {
+                "code": "fact_year_mismatch",
+                "severity": "fatal",
+                "message": "SECOND-LEAK",
+            },
+        ],
+        "answer": "LEAK-ANSWER с текстом ответа модели",
+        "chunk_text": "SECRET-CHUNK-BODY",
     }
 
     answer = generator(client).generate(
@@ -310,9 +330,37 @@ def test_repair_prompt_is_generic_and_does_not_echo_diagnostics():
 
     assert answer.status == "answer"
     user = client.completions.calls[0]["messages"][1]["content"]
-    assert "repair_instruction" in user
-    assert "Предыдущий ответ" in user
-    assert "provider-leak-marker" not in user
+    payload = json.loads(user)
+    assert "repair_instruction" in payload
+    forwarded = payload["repair_diagnostics"]
+    assert forwarded["issue_codes"] == [
+        "answer_schema_or_citation_validation_failed",
+        "fact_value_not_in_source",
+        "fact_year_mismatch",
+    ]
+    assert forwarded["invalid_chunk_ids"] == ["ghost_chunk_123"]
+    # Текст чанков, сообщений и ответа модели в repair-промпт не попадает.
+    assert "LEAK-MESSAGE" not in user
+    assert "SECOND-LEAK" not in user
+    assert "LEAK-ANSWER" not in user
+    assert "SECRET-CHUNK-BODY" not in user
+    assert "not a valid id" not in user
+
+
+def test_long_quote_is_truncated_instead_of_rejecting_the_answer() -> None:
+    payload = json.loads(valid_payload())
+    payload["citations"][0]["quote"] = "я" * (MAX_QUOTE_CHARS + 50)
+    client = FakeClient(
+        [make_response(json.dumps(payload, ensure_ascii=False))]
+    )
+
+    answer = generator(client).generate(
+        "прибыль?", make_evidence(), {"c1"}
+    )
+
+    assert answer.status == "answer"
+    assert len(answer.citations[0].quote) <= MAX_QUOTE_CHARS
+    assert "quote_truncated" in answer.warnings
 
 
 def test_history_is_bounded_and_sent_as_dialogue():
@@ -332,3 +380,76 @@ def test_history_is_bounded_and_sent_as_dialogue():
     assert len(dialogue) == 20
     assert all(len(turn["content"]) <= 2_000 for turn in dialogue)
     assert all(set(turn) == {"role", "content"} for turn in dialogue)
+
+
+def test_fact_referencing_dropped_citation_is_removed_with_warning():
+    payload = valid_payload(
+        facts=[
+            {
+                "claim": "Выдуманный факт",
+                "value": "100",
+                "unit": "млрд руб.",
+                "period": "2023",
+                "chunk_id": "outside",
+            },
+            {
+                "claim": "Чистая прибыль составила 100 млрд руб.",
+                "value": "100",
+                "unit": "млрд руб.",
+                "period": "2023",
+                "chunk_id": "c1",
+            },
+        ]
+    )
+    client = FakeClient([make_response(payload)])
+
+    answer = generator(client).generate("Прибыль?", make_evidence(), {"c1"})
+
+    assert answer.status == "answer"
+    assert [citation.chunk_id for citation in answer.citations] == ["c1"]
+    assert [fact["chunk_id"] for fact in answer.facts] == ["c1"]
+    assert "fact_not_supported" in answer.warnings
+    assert len(client.completions.calls) == 1
+
+
+def test_retry_after_invalid_json_adds_repair_instruction():
+    client = FakeClient(
+        [make_response("not json"), make_response(valid_payload())]
+    )
+
+    answer = generator(client).generate("Прибыль?", make_evidence(), {"c1"})
+
+    assert answer.status == "answer"
+    first = client.completions.calls[0]["messages"][1]["content"]
+    second = client.completions.calls[1]["messages"][1]["content"]
+    assert "repair_instruction" not in first
+    assert "repair_instruction" in second
+
+
+def test_fact_value_absent_from_cited_chunk_is_removed_with_warning():
+    payload = valid_payload(
+        facts=[
+            {
+                "claim": "Прибыль 999 млрд руб.",
+                "value": "999",
+                "unit": "млрд руб.",
+                "period": "2023",
+                "chunk_id": "c1",
+            },
+            {
+                "claim": "Чистая прибыль составила 100 млрд руб.",
+                "value": "100",
+                "unit": "млрд руб.",
+                "period": "2023",
+                "chunk_id": "c1",
+            },
+        ]
+    )
+    client = FakeClient([make_response(payload)])
+
+    answer = generator(client).generate("Прибыль?", make_evidence(), {"c1"})
+
+    assert answer.status == "answer"
+    assert [fact["value"] for fact in answer.facts] == ["100"]
+    assert "fact_not_supported" in answer.warnings
+    assert len(client.completions.calls) == 1

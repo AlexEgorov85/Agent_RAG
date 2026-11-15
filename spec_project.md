@@ -12,6 +12,14 @@
 > (§3) переписана под реальный код: hybrid search + RRF + LLM-реранкер берём из Занятия 5,
 > агентный цикл и query-analyzer — из Занятий 6–7, метрики и LLM-судья — из Занятия 8.
 > Заявленный в v3.0 стек (CrossEncoder, RAGAS, sentence-transformers) заменён на курсовой.
+>
+> **Актуализация 15.11.2026.** Раздел §2 и схема §4 остаются историческим
+> проектным замыслом. Фактическая реализация: Python-ядро + постоянный FAISS
+> `IndexFlatIP` (fallback `DenseIndex`), FastAPI adapter и React WebUI
+> (Streamlit сохранён как legacy), SQLite для истории и отдельная SQLite для
+> evaluation, `LLMExecutionLock` для межпроцессной сериализации. Текущий статус,
+> цифры benchmark и ограничения — в `README.md`, `spec_target.md`,
+> `docs/specs/web-ui-modernization.md` и `docs/specs/evaluation-webui.md`.
 
 ---
 
@@ -61,15 +69,15 @@
 | **Чанкинг** | `langchain-text-splitters.RecursiveCharacterTextSplitter` | 800/100, таблица = 1 чанк | Курс Занятие 2, as-is |
 | **Agent / RAG engine** | LangGraph `ReportAgent` + собственный `RAGEngine` | Агент оркестрирует allowlisted tools; engine отдельно тестируется | К7 + К+С |
 | **Graph Store** | `networkx.MultiDiGraph` | Один graph store для структуры, chunks и сущностей | Своё |
-| **Vector Store** | in-memory NumPy (`DenseIndex` курса) | Эмбеддинги чанков; persistent DB — только при измеренной необходимости | Курс Занятие 3 |
+| **Vector Store** | FAISS `IndexFlatIP` + in-memory NumPy `DenseIndex` как fallback | Эмбеддинги чанков, постоянный индекс в `data/indexes/{fingerprint}` | Курс Занятие 3 + своё |
 | **Keyword Index** | `rank-bm25` + `pymorphy3` | BM25 с лемматизацией | Курс Занятие 5, as-is |
 | **Embeddings** | `ai-sage/Giga-Embeddings-instruct-3B` через Cloud.ru | query_prefix-протокол | Курс Занятие 3, as-is |
 | **Reranker** | LLM `ai-sage/GigaChat3-10B-A1.8B`, scores 0–3 | Pointwise-реранкинг пула после RRF | Курс Занятие 5, as-is |
 | **LLM** | `GigaChat/GigaChat-3-Pro` через Cloud.ru (`base_url=.../v1`, `timeout=90, max_retries=2`) | Extraction, routing, generation | Курс Занятие 1, as-is |
 | **VLM** | Vision-модель через тот же endpoint | Описание графиков | Своё |
-| **UI** | `streamlit` + `streamlit-agraph` | Чат + граф + дерево структуры | Своё (в курсе только Gradio, Занятие 1 — для прототипов) |
+| **UI** | Streamlit (legacy) + React/TypeScript/Vite + FastAPI (фактический) | Чат, evidence, таблицы/графики, структура; React — целевой WebUI | Своё (в курсе только Gradio, Занятие 1 — для прототипов) |
 | **Eval retrieval** | `ranking_metrics` (курс) + mean-агрегация | Recall@k, MRR@k, nDCG@k | Курс Занятие 8 + своя агрегация |
-| **Eval качества ответа** | LLM-judge (`DeepSeek-V4-Flash`, 4 рубрики 0–2) | Faithfulness, answer_relevance, context_relevance, answer_correctness | Курс Занятие 8, as-is |
+| **Eval качества ответа** | LLM-judge (курсовая модель, 5 критериев 0–2 в фактическом контракте; 4 legacy-критерия сохранены для совместимости) | Factual accuracy, completeness, sources, analysis, constraints | Курс Занятие 8 + `spec_benchmark.md` §5.4 |
 | **Eval абстрактное (опция)** | `ragas` | Только для сверки с публичным бенчмарком, не основа | Своё/опция |
 
 > Смена стека относительно v3.0: sentence-transformers-эмбеддинги и CrossEncoder заменены
@@ -142,7 +150,9 @@
 
 Статус и измеренный результат: `spec_graph.md` §8. На dev-корпусе 2022–2023
 граф поднял recall свидетельств на multi-hop наборе с 0.62 до 0.75 (+13 п.п.)
-при небольшом снижении MRR; в WebUI пока не включён.
+при небольшом снижении MRR. `GraphAugmentedRetriever` подключён в фабрике и
+участвует в общем rerank; Streamlit показывает graph-only evidence, отдельная
+панель визуализации графа в React не включена (`graph_panel=false`).
 
 ### 3.5. Eval
 
@@ -150,7 +160,7 @@
 |---|---|---|
 | `ranking_metrics` (P@k, Recall@k, RR@k, AP@k, nDCG@k — бинарная релевантность из `relevance`) | К, Занятие 8 | **К** as-is; следим за соглашением нормировки AP@k |
 | Mean-агрегация по набору вопросов + сериализация в JSON/CSV | **С** | НОВОЕ: курс не пишет результаты на диск |
-| LLM-judge: `RUBRICS` (4 рубрики 0–2), `Judgment` (Pydantic), `judge_case(criterion)`, `JUDGE_INSTRUCTION`, `CRITERION_FIELDS`, `response_format=json_object`, t=0, max_tokens=1800 | К, Занятие 8 | **К** as-is; модель `DeepSeek-V4-Flash` |
+| LLM-judge: `RUBRICS` (5 критериев 0–2 в `eval/evaluators/judge.py`; 4 legacy-критерия — для совместимости), `Judgment`, `judge_case`, `JUDGE_INSTRUCTION`, `CRITERION_FIELDS`, `response_format=json_object`, t=0 | К, Занятие 8 | **К+**: интерфейс `Judge`/`NullJudge`, реальная калибровка не выполнена; модель задаётся конфигурацией |
 | Калибровка судьи на 3 контрольных кейса (12 вызовов) | К, Занятие 8 | **К+**: как в занятии, кейсы наши |
 | Dev-вопросы: формат `{id, split, question, report_period, category, expected_status, expected_facts, reference_facts, relevance={eid:2}}` | К, Занятие 3–4 (`development_questions`) | **К+**: формат as-is; вопросные пары переадресуем на наш корпус (курсовые ссылки `sber_ifrs_2025:p006` и т.п. указывают на отчёты 2024–2025, которых у нас нет); abstain-кейс (dev08-паттерн) сохраняем |
 | Урезанные MTEB-задачи (RuBQ 5 вопросов) | К, Занятие 8 | **К** опционально — как процедура выбора эмбеддинг-модели |
@@ -172,7 +182,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  PRESENTATION (Streamlit)                     ← ПИШЕМ С НУЛЯ    │
+│  PRESENTATION (Streamlit legacy / React WebUI) ← ПИШЕМ С НУЛЯ  │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌───────────────┐  │
 │  │ Chat UI  │  │Graph View│  │Structure │  │Timeline View  │  │
 │  │          │  │(agraph)  │  │   Tree   │  │               │  │
@@ -570,34 +580,46 @@ sberbank_graph_rag/
 
 > Отличие от v3.0: раньше шаг 6 был сборкой retrieval «с нуля», теперь почти половина retrieval уже лежит в К5 (as-is), и шаг 6 — в основном склейка, а не написание. Ориентировочно сокращает работы шага на ~25%.
 
+**Фактический статус шагов на 15.11.2026:** шаги 1, 2, 2.5, 5 (dev), 6 и 8
+(инфраструктура) реализованы; шаг 4 выполнен частично — канонически спарсены
+2015–2018, dev-корпус из 4 документов, полный набор 9 PDF не собран; шаг 3
+(таблицы → FinancialFact, картинки → VLM) не выделен в отдельный production-
+контракт; шаг 7 реализован в двух клиентах — Streamlit (legacy) и React WebUI
+с FastAPI adapter. Полный graph index, benchmark на полном корпусе и
+judge-калибровка остаются незакрытыми.
+
 ---
 
 ## 12. Критерии приёмки
 
+Статус на 15.11.2026: критерии ниже — целевые. Фактически benchmark идёт на
+30 тестах (не на 50), полный корпус 9 PDF не собран, judge не калиброван,
+temporal/structure accuracy отдельно не измерялись.
+
 ### Функциональные
-- [ ] Factoid-вопросы (переадресованные dev-вопросы) отвечают не хуже, чем чистый dense-поиск К4 baseline
-- [ ] Система отвечает на запросы всех 4 типов (factoid/LOCAL, GLOBAL, TEMPORAL, MULTI_HOP)
-- [ ] Каждый ответ имеет citations с chunk_id (К4 формат) + годом, **разделом**, страницей
-- [ ] UI показывает интерактивный граф и **дерево структуры**, ответ стримится (К7-механика)
-- [ ] Structure-aware запросы ограничивают поиск нужным разделом (eligible до top-k)
-- [ ] Abstain-механика работает в 2 ситуациях: нет данных (К4 пустой контекст; наш dev-кейс «2027 год») и пробел 2021
+- [x] Factoid-вопросы отвечают с citations; отдельного dense-only baseline на 50 вопросах нет
+- [~] Система отвечает на все 4 типа, но последний full-прогон даёт multi_hop 0/3 и temporal 2/4
+- [x] Каждый answerable-ответ имеет citations с `chunk_id`, годом, разделом и страницей
+- [~] UI показывает дерево/динамику; интерактивный граф есть только в Streamlit, в React — обычные evidence-карточки
+- [x] Structure-aware запросы ограничивают поиск разделом (eligible до top-k)
+- [x] Abstain работает для отсутствующего года и отсутствующего показателя
 
 ### Качественные (eval на 50 вопросах)
-- [ ] Retrieval: Recall@5 ≥ 0.85, MRR@5 ≥ 0.70, nDCG@5 ≥ 0.80 (формулы К8 `ranking_metrics` + своя mean-агрегация)
-- [ ] Судья К8 (4 рубрики 0–2): faithfulness mean ≥ 1.7; answer_relevance ≥ 1.6; context_relevance ≥ 1.6; answer_correctness ≥ 1.6 (шкала 0–2)
+- [~] Retrieval: последний full (30 тестов) — Recall@5 0.889, MRR 0.889; nDCG@5 0.852. Цель по Recall@5 достигнута, по 50-вопросному набору — не проверено
+- [ ] Судья К8 (4 рубрики 0–2): не калиброван, реальные прогоны идут `--no-judge`
 - [ ] Судья откалиброван на 3 контрольных кейсах (К8) до запуска на датасете; согласованность ≥ 90%
-- [ ] Temporal accuracy ≥ 0.80 (кастомная, поверх facts-формата К4)
-- [ ] Structure accuracy ≥ 0.85 (кастомная: цитаты из правильного раздела)
+- [ ] Temporal accuracy ≥ 0.80 (кастомная, поверх facts-формата К4) — отдельно не измерена
+- [ ] Structure accuracy ≥ 0.85 (кастомная: цитаты из правильного раздела) — отдельно не измерена
 - [ ] (Опционально) перекрёстная проверка ragas — faithfulness ≥ 0.85, context precision ≥ 0.75
 
 ### Инженерные
-- [ ] Курсовые модули (DenseIndex, BM25-лемматизация, rrf, rerank, pack_context, SYSTEM_PROMPT, ranking_metrics, judge) — работают **без изменений логики**, видимые диффы только в путях/именах данных
-- [ ] Курсовой контракт чанка К2 не изменён (только опциональные breadcrumbs-поля)
-- [ ] Кэш векторов с `corpus_fingerprint` (К3) — переиспользован для всех 9 отчётов
-- [ ] `pack_context` не режет таблицы (К4 as-is)
-- [ ] Прогон eval сериализуется в JSON/CSV (своё; курс этого не делает)
-- [ ] Код покрыт docstrings (Google-style), типизация (Python type hints)
-- [ ] README с инструкцией и запуском eval
+- [x] Курсовые модули (DenseIndex, BM25-лемматизация, rrf, rerank, pack_context, SYSTEM_PROMPT, ranking_metrics, judge) работают без изменения логики
+- [x] Курсовой контракт чанка К2 не изменён (только опциональные breadcrumbs-поля)
+- [~] Кэш векторов с `corpus_fingerprint` переиспользован для 4 dev-документов и 2015–2018; полный набор 9 PDF не собран
+- [x] `pack_context` не режет таблицы (К4 as-is)
+- [x] Прогон eval сериализуется в JSON/CSV/HTML
+- [x] Код покрыт docstrings (Google-style), типизация (Python type hints)
+- [x] README с инструкцией установки, запуска и eval
 
 ---
 

@@ -30,6 +30,10 @@ class QueryPlan:
     needs_rewriting: bool = False
     needs_graph: bool = False
     answer_mode: Literal["concise", "comparison", "outline"] = "concise"
+    #: До 4 поисковых аспектов и до 5 канонических metric id.
+    aspects: list[str] = field(default_factory=list)
+    required_metrics: list[str] = field(default_factory=list)
+    requires_comparison: bool = False
 
 
 @dataclass(frozen=True)
@@ -64,6 +68,8 @@ class Answer:
     warnings: list[str] = field(default_factory=list)
     #: Детерминированные расчёты по ``facts``; не являются фактами из отчёта.
     calculations: list[dict[str, Any]] = field(default_factory=list)
+    #: Результат проверки citations/facts/периодов; заполняется AgentService.
+    verification: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -126,6 +132,9 @@ class AgentState(TypedDict, total=False):
     graph_evidence_manifest: set[str]
     evidence: dict[str, Any]
     answer: Answer | None
+    #: Текст уточняющего вопроса, если период запрошен неявно (clarify-политика).
+    #: При непустом значении поиск не запускается, а ответ — abstain с причиной.
+    clarification: str | None
     status: str
     tool_calls_used: int
     search_calls_used: int
@@ -138,6 +147,7 @@ class AgentState(TypedDict, total=False):
     expected_years: list[int]
     covered_years: list[int]
     missing_years: list[int]
+    coverage: Any
     rewritten_queries: list[str]
     search_attempts: list[dict[str, Any]]
     available_documents: dict[int, list[str]]

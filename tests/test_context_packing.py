@@ -199,3 +199,90 @@ def test_character_and_token_budgets_are_both_enforced():
 
     assert by_chars.manifest.included == []
     assert by_tokens.manifest.included == []
+
+
+# --- AnswerGenerator: context_chunk_ids для diagnostics --------------------
+
+
+class _FakeCompletions:
+    def __init__(self, chunk_id: str) -> None:
+        self.chunk_id = chunk_id
+        self.calls: list[dict] = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        payload = json.dumps(
+            {
+                "status": "answer",
+                "answer": "Ответ по источнику.",
+                "citations": [{"chunk_id": self.chunk_id}],
+                "facts": [],
+                "warnings": [],
+            },
+            ensure_ascii=False,
+        )
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=payload))]
+        )
+
+
+class _FakeClient:
+    def __init__(self, chunk_id: str) -> None:
+        from types import SimpleNamespace
+
+        self.completions = _FakeCompletions(chunk_id)
+        self.chat = SimpleNamespace(completions=self.completions)
+
+
+def _generator(chunk_id: str, **kwargs):
+    from src.engine.generator import AnswerGenerator
+
+    return AnswerGenerator(_FakeClient(chunk_id), "test-model", **kwargs)
+
+
+def test_generator_exposes_only_packed_context_chunk_ids():
+    small = make_chunk("small", text="short text")
+    huge = make_chunk("huge", text="H" * 5_000)
+    budget = len(pack_context([small], max_chars=1_000_000).text)
+    generator = _generator("small", max_context_chars=budget)
+
+    answer = generator.generate(
+        "Прибыль?", {"small": small, "huge": huge}, {"small", "huge"}
+    )
+
+    assert answer.status == "answer"
+    # В контекст попал только чанк, целиком поместившийся в бюджет.
+    assert generator.last_context_chunk_ids == ["small"]
+    assert generator.last_context_chunk_ids == pack_context(
+        [small, huge], max_chars=budget
+    ).context_chunk_ids
+
+
+def test_generator_context_ids_are_none_when_not_packed():
+    generator = _generator("c1")
+
+    empty_manifest = generator.generate("Прибыль?", {"c1": make_chunk("c1")}, set())
+    assert empty_manifest.status == "abstain"
+    assert generator.last_context_chunk_ids is None
+
+    too_small = _generator("c1", max_context_chars=10)
+    abstained = too_small.generate(
+        "Прибыль?", {"c1": make_chunk("c1")}, {"c1"}
+    )
+    assert abstained.status == "abstain"
+    # Упаковка выполнялась, но ни один чанк не поместился.
+    assert too_small.last_context_chunk_ids == []
+
+
+def test_generator_context_ids_are_reset_between_calls():
+    generator = _generator("c1")
+    assert generator.generate(
+        "q", {"c1": make_chunk("c1")}, {"c1"}
+    ).status == "answer"
+    assert generator.last_context_chunk_ids == ["c1"]
+
+    # Следующий вызов без evidence сбрасывает прошлый список, а не переиспользует его.
+    generator.generate("q", {"c1": make_chunk("c1")}, set())
+    assert generator.last_context_chunk_ids is None

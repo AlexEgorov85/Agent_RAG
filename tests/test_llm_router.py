@@ -156,3 +156,32 @@ def test_llm_years_outside_corpus_window_are_ignored() -> None:
 
     assert plan.years == []
     assert plan.intent == "factoid"
+
+
+def test_llm_does_not_invent_metrics_not_mentioned_in_question() -> None:
+    """Модель не должна расширять простой factoid до всего словаря метрик."""
+    client = FakeClient(
+        {
+            "intent": "factoid",
+            "years": [2023],
+            "required_metrics": [
+                "net_profit",
+                "revenue",
+                "roe",
+                "roa",
+                "assets",
+            ],
+        }
+    )
+    router = LLMRouter(
+        client,
+        "fake",
+        YEARS,
+        fallback=SimpleRouter(YEARS),
+    )
+
+    plan = router.analyze(
+        "Какая чистая прибыль Сбербанка за 2023 год?", SearchFilters()
+    )
+
+    assert plan.required_metrics == ["net_profit"]

@@ -1,6 +1,18 @@
 # Evaluation / Benchmark WebUI — Agent_RAG
 
-**Статус:** Proposed
+**Статус:** In progress (обновление 15.11.2026): Evaluation API
+(`/api/evaluation/*`) и storage реализованы и покрыты тестами (20 API-тестов);
+React-раздел `/evaluation` реализован (обзор, запуски, тесты, сравнение, trace,
+отмена), есть навигация чат↔Evaluation и 2 Playwright E2E-сценария. Прогресс
+отдаётся polling'ом, SSE-канала нет. Chat и evaluation сериализуют LLM через
+`ExecutionGate` и межпроцессный `LLMExecutionLock` (занятый lock → `llm_busy`).
+Раздел выключен по умолчанию (`EVAL_UI_ENABLED=0`).
+Полный прогон 30 тестов доступен из UI; последний зафиксированный результат —
+23/30 (`pass_rate 0.767`, Recall@5 0.889) на dev-корпусе, см.
+`eval/results/20261115_183541_0a97989/`; предыдущий — 24/30 (`174124`). В UI
+пока нет SSE-прогресса, выбора `attempt > 0` и перехода из chunk теста в
+Evidence Panel чата.
+
 **Версия:** 1.1
 **Дата:** 14.11.2026
 **Тип изменения:** UI-раздел + Evaluation API
@@ -682,9 +694,9 @@ Diagnostics: evidence за 2021 отсутствует; ответ не назв
 | GET | `/api/evaluation/runs/{id}/tests` | результаты тестов |
 | GET | `/api/evaluation/runs/{id}/tests/{test_id}` | детализация теста |
 | GET | `/api/evaluation/runs/{id}/tests/{test_id}/trace` | полный trace |
-| GET | `/api/evaluation/runs/{id}/report` | HTML/Markdown-отчёт (опционально) |
-| POST | `/api/evaluation/runs/{id}/cancel` | отмена (опционально) |
-| GET | `/api/evaluation/runs/{id}/events` | SSE-прогресс (опционально) |
+| GET | `/api/evaluation/runs/{id}/report` | HTML/Markdown-отчёт (реализовано) |
+| POST | `/api/evaluation/runs/{id}/cancel` | отмена (реализовано для queued/running) |
+| GET | `/api/evaluation/runs/{id}/events` | SSE-прогресс — **не реализовано**, UI использует polling |
 | GET | `/api/evaluation/tests` | каталог тестов |
 | GET | `/api/evaluation/tests/{test_id}` | определение + история |
 | GET | `/api/evaluation/compare` | сравнение двух запусков |
@@ -1275,17 +1287,24 @@ CREATE INDEX ix_eval_results_failed
 |---|---|---|
 | `EVAL_UI_ENABLED` | `0` | Включает раздел и endpoints |
 | `EVAL_RESULTS_DIR` | `eval/results` | Каталог артефактов runner'а |
+| `EVAL_DATASETS_DIR` | `eval/datasets` | Каталог suite-файлов датасета |
 | `EVAL_DB_PATH` | `data/evaluation/evaluation.sqlite3` | Отдельная БД evaluation |
 | `EVAL_MAX_CONCURRENCY` | `1` | В первой версии только 1 |
 | `EVAL_QUEUE_SIZE` | `3` | Максимум ожидающих запусков |
 | `EVAL_YIELD_MS` | `250` | Пауза между turn'ами/тестами для chat |
+| `EVAL_JUDGE_ENABLED` | `0` | Включает LLM-судью (`capabilities.judge`) |
+| `EVAL_FAKE_SERVICE` | `0` | Офлайн-запуск без LLM и сети |
 | `LLM_LOCK_PATH` | `data/evaluation/llm.lock` | Общий межпроцессный LLM-lock (API + CLI) |
 | `LLM_LOCK_TIMEOUT_S` | `900` | Сколько ждать lock перед `llm_busy` |
-| `LLM_LOCK_STALE_S` | `120` | Возраст heartbeat, после которого lock считается брошенным |
+| `LLM_LOCK_STALE_S` | `900` | Возраст heartbeat, после которого lock считается брошенным |
 | `EVAL_RETENTION_RUNS` | `50` | Сколько завершённых run'ов хранить |
 | `EVAL_TURN_TIMEOUT_S` | `300` | Таймаут одного turn'а |
 | `EVAL_RUN_TIMEOUT_S` | `7200` | Таймаут всего запуска |
-| `EVAL_ALLOWED_ROLES` | `evaluator` | Роль при включённой аутентификации |
+
+`EVAL_ALLOWED_ROLES` в текущем коде не читается: реализован только
+`AUTH_MODE=local` с одним владельцем. Роли `evaluator`/`user` и
+соответствующая авторизация остаются целью при появлении многопользовательского
+режима; сейчас изоляция обеспечивается `owner_id` и cookie владельца.
 
 Секреты и модель не задаются во frontend; они читаются backend-конфигурацией.
 
@@ -1316,93 +1335,95 @@ CREATE INDEX ix_eval_results_failed
 
 ### Навигация и обзор
 
-- [ ] **AC-E01.** Evaluation — отдельный route, не вкладка чата; переход не теряет
+- [x] **AC-E01.** Evaluation — отдельный route, не вкладка чата; переход не теряет
   выбранное исследование.
-- [ ] **AC-E02.** Раздел содержит четыре вкладки: Обзор, Запуски, Тесты, Сравнение.
-- [ ] **AC-E03.** При `evaluation_ui=false` пункт скрыт; прямой route показывает
+- [x] **AC-E02.** Раздел содержит четыре вкладки: Обзор, Запуски, Тесты, Сравнение.
+- [x] **AC-E03.** При `evaluation_ui=false` пункт скрыт; прямой route показывает
   `evaluation_disabled`, а не пустой экран.
-- [ ] **AC-E04.** Обзор показывает четыре независимые метрики последнего
-  завершённого запуска; неизмеренная метрика — `—`, не `0`.
-- [ ] **AC-E05.** Дельта к предыдущему запуску показывается только при наличии
+- [x] **AC-E04.** Обзор показывает независимые метрики последнего завершённого
+  запуска; неизмеренная метрика — `—`, не `0`.
+- [x] **AC-E05.** Дельта к предыдущему запуску показывается только при наличии
   предыдущего; значения не вычисляются из сырых traces во frontend.
-- [ ] **AC-E06.** График динамики использует только реальные запуски; пропуски
+- [x] **AC-E06.** График динамики использует только реальные запуски; пропуски
   не превращаются в ноль.
 
 ### Запуски
 
-- [ ] **AC-E07.** `POST /runs` возвращает `202` и `run_id`; benchmark не
+- [x] **AC-E07.** `POST /runs` возвращает `202` и `run_id`; benchmark не
   выполняется в HTTP-запросе.
-- [ ] **AC-E08.** UI показывает `queued → running → cancel_requested →
+- [x] **AC-E08.** UI показывает `queued → running → cancel_requested →
   completed/failed/cancelled` и progress без вечного spinner; `interrupted` виден
   после рестарта API.
-- [ ] **AC-E09.** Smoke и Full запускаются; holdout требует явного подтверждения;
+- [x] **AC-E09.** Smoke и Full запускаются; holdout требует явного подтверждения;
   smoke не включает holdout.
-- [ ] **AC-E10.** Повторный запуск при активном benchmark не создаёт второй
+- [x] **AC-E10.** Повторный запуск при активном benchmark не создаёт второй
   параллельный run; очередь ограничена и сообщает `queue_full`.
-- [ ] **AC-E11.** После завершения доступны summary, tests, report; при ошибке
+- [x] **AC-E11.** После завершения доступны summary, tests, report; при ошибке
   показывается код и `run_id`.
-- [ ] **AC-E12.** Отмена (если включена) останавливает runner между turn'ами и
+- [x] **AC-E12.** Отмена (если включена) останавливает runner между turn'ами и
   сохраняет частичные результаты.
 
 ### Тесты
 
-- [ ] **AC-E13.** Каталог тестов фильтруется по difficulty/category/status/
+- [x] **AC-E13.** Каталог тестов фильтруется по difficulty/category/status/
   critical; показывает последний статус.
-- [ ] **AC-E14.** Детализация теста показывает query plan, retrieval-этапы,
+- [x] **AC-E14.** Детализация теста показывает query plan, retrieval-этапы,
   evidence coverage, ответ, critical errors и диагностику.
-- [ ] **AC-E15.** Пропущенный год/фрагмент отображается как пропуск, а не ноль;
+- [x] **AC-E15.** Пропущенный год/фрагмент отображается как пропуск, а не ноль;
   `not_found` и `year_absent` различаются.
-- [ ] **AC-E16.** Trace доступен отдельным запросом; в нём нет prompt,
+- [x] **AC-E16.** Trace доступен отдельным запросом; в нём нет prompt,
   chain-of-thought, ключей и полного текста корпуса.
-- [ ] **AC-E17.** Клик по chunk открывает существующий Evidence Panel по
-  `chunk_id`; при отсутствии trace показывается `trace_unavailable`.
+- [~] **AC-E17.** При отсутствии trace показывается `trace_unavailable`; клик по
+  chunk в Evaluation **пока не** открывает Evidence Panel чата (chunk_id
+  отображается, но перехода нет).
 
 ### Сравнение
 
-- [ ] **AC-E18.** Сравнение двух запусков показывает метрики, дельты, улучшения
+- [x] **AC-E18.** Сравнение двух запусков показывает метрики, дельты, улучшения
   и регрессии; ухудшения не скрываются.
-- [ ] **AC-E19.** Разные `dataset.sha256` или `corpus.content_sha256` дают
+- [x] **AC-E19.** Разные `dataset.sha256` или `corpus.content_sha256` дают
   `comparable=false` с причинами; side-by-side разрешён, но дельты не выдаются как
   надёжные. Разный git SHA/модель/config дельты не блокирует.
-- [ ] **AC-E20.** Изменения статусов тестов (`pass→fail`, `fail→pass`) видны
+- [x] **AC-E20.** Изменения статусов тестов (`pass→fail`, `fail→pass`) видны
   списком и фильтруются.
 
 ### Архитектура и безопасность
 
-- [ ] **AC-E21.** Runner вызывает тот же `AgentService`; второй копии агента нет.
-- [ ] **AC-E22.** Все вызовы LLM сериализованы через `ExecutionGate` внутри API и
+- [x] **AC-E21.** Runner вызывает тот же `AgentService`; второй копии агента нет.
+- [x] **AC-E22.** Все вызовы LLM сериализованы через `ExecutionGate` внутри API и
   `LLMExecutionLock` между API и CLI; benchmark и чат не конкурируют; benchmark
   удерживает lock не дольше одного turn.
-- [ ] **AC-E23.** Evaluation storage отделён от истории чата; полные traces
+- [x] **AC-E23.** Evaluation storage отделён от истории чата; полные traces
   лежат на диске, БД хранит индекс/summary.
-- [ ] **AC-E24.** При перезапуске API `running` → `interrupted`; UI не показывает
+- [x] **AC-E24.** При перезапуске API `running` → `interrupted`; UI не показывает
   завершённый результат.
-- [ ] **AC-E25.** Версии (git SHA/dirty, dataset hash, corpus content hash, corpus
+- [x] **AC-E25.** Версии (git SHA/dirty, dataset hash, corpus content hash, corpus
   fingerprint, model, prompt hashes) видны в карточке и сравнении.
-- [ ] **AC-E26.** Evaluation endpoints защищены: local owner или роль `evaluator`;
-  чужой run недоступен.
-- [ ] **AC-E27.** В API/UI/логах нет секретов, prompt и полного текста корпуса.
-- [ ] **AC-E28.** Frontend не запускает retrieval/LLM, не пересчитывает метрики и
+- [~] **AC-E26.** Evaluation endpoints защищены владельцем (`AUTH_MODE=local`,
+  cookie): чужой run недоступен. Роль `evaluator` и многопользовательская
+  авторизация не реализованы.
+- [x] **AC-E27.** В API/UI/логах нет секретов, prompt и полного текста корпуса.
+- [x] **AC-E28.** Frontend не запускает retrieval/LLM, не пересчитывает метрики и
   не меняет gold evidence.
-- [ ] **AC-E29.** Empty/error/loading состояния работают для всех четырёх вкладок.
-- [ ] **AC-E30.** Offline contract/component/E2E-тесты проходят на fixtures без
+- [x] **AC-E29.** Empty/error/loading состояния работают для всех четырёх вкладок.
+- [x] **AC-E30.** Offline contract/component/E2E-тесты проходят на fixtures без
   сети и LLM.
 
 ### Контракты и согласованность
 
-- [ ] **AC-E31.** Результат теста адресуется `(run_id, test_id, retrieval_mode,
+- [x] **AC-E31.** Результат теста адресуется `(run_id, test_id, retrieval_mode,
   attempt_index)`; при `retrieval_mode=all` три режима дают три строки БД и три
   trace-файла без перезаписи.
-- [ ] **AC-E32.** `EvaluationRunStatus` включает `cancel_requested`; переходы
+- [x] **AC-E32.** `EvaluationRunStatus` включает `cancel_requested`; переходы
   `running → cancel_requested → cancelled` и `queued/running → interrupted`
   реализованы; `abstained` не отображается как ошибка.
-- [ ] **AC-E33.** CLI и API используют один `LLMExecutionLock`; параллельный вызов
+- [x] **AC-E33.** CLI и API используют один `LLMExecutionLock`; параллельный вызов
   LLM из двух процессов технически невозможен, а не запрещён инструкцией.
-- [ ] **AC-E34.** Сопоставимость в UI и API совпадает с `spec_benchmark.md` §8.3;
+- [x] **AC-E34.** Сопоставимость в UI и API совпадает с `spec_benchmark.md` §8.3;
   разный content hash корпуса даёт `not_comparable`.
-- [ ] **AC-E35.** Pass rate показывается вместе с execution coverage; eligible,
+- [x] **AC-E35.** Pass rate показывается вместе с execution coverage; eligible,
   selected, executed, skipped и errors не смешиваются.
-- [ ] **AC-E36.** Endpoint детализации и trace требуют `retrieval_mode` при
+- [x] **AC-E36.** Endpoint детализации и trace требуют `retrieval_mode` при
   неоднозначности и возвращают `ambiguous_test_result`, а не первый попавшийся режим.
 
 ---
@@ -1411,12 +1432,12 @@ CREATE INDEX ix_eval_results_failed
 
 | Уровень | Что проверяется | Где | Блокирует merge |
 |---|---|---|---|
-| API contract | POST/GET схемы, коды, пагинация, idempotency | `tests/api/test_evaluation_api.py` | да |
-| Store | runs/results, WAL, cascade, interrupted, retention, составной ключ с режимом | `tests/api/test_evaluation_store.py` | да |
-| Worker | queue, один running, progress, cancel, artifact import | `tests/api/test_evaluation_worker.py` | да |
-| Gate | chat priority, один LLM-call, yield между turn'ами | `tests/api/test_execution_gate.py` | да |
-| Cross-process lock | CLI + API не вызывают LLM одновременно, stale lock | `tests/api/test_llm_lock.py` | да |
-| Result identity | режимы, attempts, trace paths, `ambiguous_test_result` | `tests/api/test_evaluation_results.py` | да |
+| API contract | POST/GET схемы, коды, пагинация, idempotency | `tests/test_web_api_evaluation.py` (20 тестов) | да |
+| Store | runs/results, WAL, cascade, interrupted, retention, составной ключ с режимом | `tests/test_web_api_evaluation.py`, `tests/test_web_api_store.py` | да |
+| Worker | queue, один running, progress, cancel, artifact import | `tests/test_web_api_evaluation.py` | да |
+| Gate | chat priority, один LLM-call, yield между turn'ами | `tests/test_api_execution.py` | да |
+| Cross-process lock | CLI + API не вызывают LLM одновременно, stale lock | `tests/test_llm_lock.py`, `tests/test_api_execution.py` | да |
+| Result identity | режимы, attempts, trace paths, `ambiguous_test_result` | `tests/test_web_api_evaluation.py` | да |
 | Frontend unit | cards, statuses, filters, compare, empty states | `frontend/tests/unit/evaluation/*` | да |
 | Frontend contract | типы ответов, `null`/`—`, not_comparable | `frontend/tests/unit/evaluation/contracts.test.ts` | да |
 | E2E | запуск smoke → прогресс → summary → тест → trace → сравнение | `frontend/tests/e2e/evaluation.spec.ts` | да |
@@ -1520,28 +1541,32 @@ progress и summary, artifacts импортируются.
 
 ## 18. Definition of Done
 
-- [ ] Evaluation — отдельный route с четырьмя вкладками.
-- [ ] Smoke/Full запускаются через API в фоне; HTTP не блокируется.
-- [ ] История запусков и summary сохраняются после перезапуска API.
-- [ ] Детализация теста показывает query plan, retrieval, evidence, answer,
+- [x] Evaluation — отдельный route с четырьмя вкладками.
+- [x] Smoke/Full запускаются через API в фоне; HTTP не блокируется.
+- [x] История запусков и summary сохраняются после перезапуска API.
+- [x] Детализация теста показывает query plan, retrieval, evidence, answer,
   critical errors и diagnostics.
-- [ ] Trace доступен отдельно и не содержит prompt/секретов/полного корпуса.
-- [ ] Сравнение показывает дельты, улучшения и регрессии; разные datasets —
+- [x] Trace доступен отдельно и не содержит prompt/секретов/полного корпуса.
+- [x] Сравнение показывает дельты, улучшения и регрессии; разные datasets —
   `not_comparable`.
-- [ ] График динамики строится по реальным запускам без нулей на пропусках.
-- [ ] Benchmark использует тот же `AgentService`; второй копии нет.
-- [ ] LLM-вызовы сериализованы; benchmark не конкурирует с чатом ни внутри API, ни с
+- [x] График динамики строится по реальным запускам без нулей на пропусках.
+- [x] Benchmark использует тот же `AgentService`; второй копии нет.
+- [x] LLM-вызовы сериализованы; benchmark не конкурирует с чатом ни внутри API, ни с
   CLI-runner'ом.
-- [ ] Результаты различаются по `retrieval_mode` и `attempt_index`; trace-файлы не
+- [x] Результаты различаются по `retrieval_mode` и `attempt_index`; trace-файлы не
   перезаписываются при `retrieval_mode=all`.
-- [ ] Статусы Evaluation run включают `cancel_requested`; `abstained` не выдаётся за
+- [x] Статусы Evaluation run включают `cancel_requested`; `abstained` не выдаётся за
   ошибку.
-- [ ] Pass rate показывается вместе с execution coverage.
-- [ ] Evaluation storage отделён от чата.
-- [ ] Версии и dataset hash видны в UI.
-- [ ] Empty/error/loading состояния работают.
-- [ ] Offline contract/component/E2E-тесты проходят.
-- [ ] README и связанные specs обновлены ссылками.
+- [x] Pass rate показывается вместе с execution coverage.
+- [x] Evaluation storage отделён от чата.
+- [x] Версии и dataset hash видны в UI.
+- [x] Empty/error/loading состояния работают.
+- [x] Offline contract/component/E2E-тесты проходят.
+- [x] README и связанные specs обновлены ссылками.
+
+Не входит в текущую приёмку: переход из chunk Evaluation в Evidence Panel чата,
+SSE-прогресс Evaluation (`evaluation_sse=false`), UI-выбор `attempt > 0` и
+многопользовательские роли (`AUTH_MODE=local`).
 
 ---
 

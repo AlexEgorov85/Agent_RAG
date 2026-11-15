@@ -1,0 +1,970 @@
+{
+  "schema_version": "1.1",
+  "suite": "easy",
+  "expected_corpus_sha256": "64c9997e9ef5ee7bb5455bdd6c098d0736e8c9605b7e30f29197557eba719a8e",
+  "tests": [
+    {
+      "id": "easy_001",
+      "suite": "easy",
+      "split": "dev",
+      "category": "fact_lookup",
+      "difficulty": "easy",
+      "tags": [
+        "smoke",
+        "numeric"
+      ],
+      "question": "Какая чистая прибыль Группы за 2023 год?",
+      "filters": {
+        "years": [
+          2023
+        ],
+        "allowed_doc_ids": [
+          "sber_2023"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "Чистая прибыль за 2023 год составила 1 508,6 млрд рублей.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "net_profit",
+            "metric_aliases": [
+              "чистая прибыль",
+              "прибыль"
+            ],
+            "year": 2023,
+            "value": 1508.6,
+            "unit": "млрд руб.",
+            "unit_aliases": [
+              "млрд рублей",
+              "млрд руб",
+              "млрд RUB"
+            ],
+            "tolerance": 0.01
+          }
+        ],
+        "required_years": [
+          2023
+        ],
+        "required_documents": [
+          "sber_2023"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [
+          "значение",
+          "единица измерения"
+        ],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "net_profit_2023",
+            "any_of": [
+              "sber_2023:00078:c3:c5cc6e1f46e2"
+            ],
+            "section": "Финансовые результаты"
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 2,
+        "max_tool_calls": 4,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "чистая прибыль"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "Значение 1 508,6 млрд руб. и chunk_id проверены по отчёту за 2023 год, стр. 8."
+    },
+    {
+      "id": "easy_002",
+      "suite": "easy",
+      "split": "dev",
+      "category": "fact_lookup",
+      "difficulty": "easy",
+      "tags": [
+        "smoke",
+        "numeric",
+        "citation"
+      ],
+      "question": "Какой уровень рентабельности капитала (ROE) за 2023 год?",
+      "filters": {
+        "years": [
+          2023
+        ],
+        "allowed_doc_ids": [
+          "sber_2023"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "По итогам 2023 года ROE составил 25,3%.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "roe",
+            "metric_aliases": [
+              "roe",
+              "рентабельность капитала"
+            ],
+            "year": 2023,
+            "value": 25.3,
+            "unit": "%",
+            "unit_aliases": [
+              "процент",
+              "процентов"
+            ],
+            "tolerance": 0.01
+          }
+        ],
+        "required_years": [
+          2023
+        ],
+        "required_documents": [
+          "sber_2023"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [
+          "значение",
+          "единица измерения"
+        ],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "roe_2023",
+            "any_of": [
+              "sber_2023:00078:c3:c5cc6e1f46e2",
+              "sber_2023:00136:c1:3335c25de148"
+            ],
+            "section": "Финансовые результаты"
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 2,
+        "max_tool_calls": 4,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "25,3"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "ROE 25,3% подтверждён двумя фрагментами отчёта за 2023 год, стр. 8 и 12."
+    },
+    {
+      "id": "easy_003",
+      "suite": "easy",
+      "split": "dev",
+      "category": "fact_lookup",
+      "difficulty": "easy",
+      "tags": [
+        "smoke",
+        "2016"
+      ],
+      "question": "Как изменилась доля Сбербанка на рынке ипотечного кредитования в 2016 году?",
+      "filters": {
+        "years": [
+          2016
+        ],
+        "allowed_doc_ids": [
+          "sber_2016"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "Конкуренция на рынке ипотечного кредитования обострилась из-за программы государственной поддержки ипотеки, доля Сбербанка немного снизилась.",
+      "expected": {
+        "required_facts": [],
+        "required_years": [
+          2016
+        ],
+        "required_documents": [
+          "sber_2016"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [
+          "конкуренция",
+          "снижение доли"
+        ],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "mortgage_market_2016",
+            "any_of": [
+              "sber_2016:00594:c0:0faf32845477"
+            ],
+            "section": "Рыночные позиции"
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 2,
+        "max_tool_calls": 4,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "ипотек"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "Фрагмент отчёта за 2016 год, стр. 30 (page_pdf 33): конкуренция обострилась, доля немного снизилась."
+    },
+    {
+      "id": "easy_004",
+      "suite": "easy",
+      "split": "dev",
+      "category": "fact_lookup",
+      "difficulty": "easy",
+      "tags": [
+        "smoke",
+        "numeric",
+        "2017"
+      ],
+      "question": "Какая доля населения России является активными клиентами Сбербанка в 2017 году?",
+      "filters": {
+        "years": [
+          2017
+        ],
+        "allowed_doc_ids": [
+          "sber_2017"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "Активными клиентами Сбербанка является 60% населения Российской Федерации.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "active_clients_share",
+            "metric_aliases": [
+              "активными клиентами",
+              "активные клиенты",
+              "доля населения"
+            ],
+            "year": 2017,
+            "value": 60.0,
+            "unit": "%",
+            "unit_aliases": [
+              "процент",
+              "процентов"
+            ],
+            "tolerance": 0.01
+          }
+        ],
+        "required_years": [
+          2017
+        ],
+        "required_documents": [
+          "sber_2017"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [
+          "значение",
+          "единица измерения"
+        ],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "active_clients_share_2017",
+            "any_of": [
+              "sber_2017:00055:c4:7d9464770c8f"
+            ],
+            "section": "Клиенты"
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 2,
+        "max_tool_calls": 4,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "60"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "Фрагмент отчёта за 2017 год, стр. 4: активными клиентами является 60% населения России."
+    },
+    {
+      "id": "easy_005",
+      "suite": "easy",
+      "split": "dev",
+      "category": "fact_lookup",
+      "difficulty": "easy",
+      "tags": [
+        "numeric",
+        "2023",
+        "capital"
+      ],
+      "question": "Каким был коэффициент достаточности базового капитала первого уровня (CET1) по Группе за 2023 год?",
+      "filters": {
+        "years": [
+          2023
+        ],
+        "allowed_doc_ids": [
+          "sber_2023"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "По итогам 2023 года коэффициент достаточности базового капитала первого уровня (CET1) составил 13,2%.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "cet1",
+            "metric_aliases": [
+              "cet1",
+              "достаточность базового капитала",
+              "базовый капитал"
+            ],
+            "year": 2023,
+            "value": 13.2,
+            "unit": "%",
+            "unit_aliases": [
+              "процент",
+              "процентов"
+            ],
+            "tolerance": 0.01
+          }
+        ],
+        "required_years": [
+          2023
+        ],
+        "required_documents": [
+          "sber_2023"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [
+          "значение",
+          "единица измерения"
+        ],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "cet1_2023",
+            "any_of": [
+              "sber_2023:00136:c1:3335c25de148"
+            ],
+            "section": "Сбер в цифрах и фактах/Культура выполнения ключевых стратегических целей"
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 2,
+        "max_tool_calls": 4,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "cet1",
+          "re:13[.,]2"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "Отчёт за 2023 год, стр. 12: CET1 по итогам 2023 года — 13,2%."
+    },
+    {
+      "id": "easy_006",
+      "suite": "easy",
+      "split": "dev",
+      "category": "fact_lookup",
+      "difficulty": "easy",
+      "tags": [
+        "numeric",
+        "2023",
+        "clients"
+      ],
+      "question": "Сколько активных корпоративных клиентов было у Сбера в 2023 году?",
+      "filters": {
+        "years": [
+          2023
+        ],
+        "allowed_doc_ids": [
+          "sber_2023"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "В 2023 году у Сбера было 3,2 млн активных корпоративных клиентов.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "active_corporate_clients",
+            "metric_aliases": [
+              "активных корпоративных клиентов",
+              "корпоративные клиенты"
+            ],
+            "year": 2023,
+            "value": 3.2,
+            "unit": "млн",
+            "unit_aliases": [
+              "млн",
+              "миллиона",
+              "миллионов"
+            ],
+            "tolerance": 0.01
+          }
+        ],
+        "required_years": [
+          2023
+        ],
+        "required_documents": [
+          "sber_2023"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [
+          "значение",
+          "единица измерения"
+        ],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "active_corporate_clients_2023",
+            "any_of": [
+              "sber_2023:00312:c0:d89c12012c4f"
+            ],
+            "section": "Сбер в цифрах и фактах/Экосистема В2В в 2023 году"
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 2,
+        "max_tool_calls": 4,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "клиент",
+          "re:3[.,]2"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "Отчёт за 2023 год, стр. 15: 3,2 млн активных корпоративных клиентов."
+    },
+    {
+      "id": "easy_007",
+      "suite": "easy",
+      "split": "dev",
+      "category": "fact_lookup",
+      "difficulty": "easy",
+      "tags": [
+        "2017",
+        "dividends"
+      ],
+      "question": "Как изменилась дивидендная политика Сбербанка в 2017 году?",
+      "filters": {
+        "years": [
+          2017
+        ],
+        "allowed_doc_ids": [
+          "sber_2017"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "Новая дивидендная политика предусматривала повышение доли дивидендных выплат с 25% до 50% в течение трёх лет.",
+      "expected": {
+        "required_facts": [],
+        "required_years": [
+          2017
+        ],
+        "required_documents": [
+          "sber_2017"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [
+          "25%",
+          "50%",
+          "три года"
+        ],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "dividend_policy_2017",
+            "any_of": [
+              "sber_2017:00342:c1:ef177943f37f"
+            ],
+            "section": "Стратегия Группы/Кредитные рейтинги"
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 2,
+        "max_tool_calls": 4,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "дивиденд",
+          "25",
+          "50"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "Отчёт за 2017 год, стр. 15: повышение доли дивидендных выплат с 25% до 50% в течение трёх лет."
+    },
+    {
+      "id": "easy_008",
+      "suite": "easy",
+      "split": "dev",
+      "category": "fact_lookup",
+      "difficulty": "easy",
+      "tags": [
+        "2017",
+        "strategy"
+      ],
+      "question": "Какие ключевые стратегические приоритеты были заявлены Сбербанком на период до 2020 года?",
+      "filters": {
+        "years": [
+          2017
+        ],
+        "allowed_doc_ids": [
+          "sber_2017"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "Ключевые приоритеты Стратегии 2020: улучшение клиентского опыта, технологическое лидерство и развитие экосистемы.",
+      "expected": {
+        "required_facts": [],
+        "required_years": [
+          2017
+        ],
+        "required_documents": [
+          "sber_2017"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [
+          "клиентский опыт",
+          "технологическое лидерство",
+          "экосистема"
+        ],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "strategy_2020_priorities",
+            "any_of": [
+              "sber_2017:00055:c3:468cb01058ec"
+            ],
+            "section": "Ограничение ответственности"
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 2,
+        "max_tool_calls": 4,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "клиентск",
+          "технологическ",
+          "экосистем"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "Отчёт за 2017 год, стр. 4: клиентский опыт, технологическое лидерство, развитие экосистемы."
+    },
+    {
+      "id": "easy_009",
+      "suite": "easy",
+      "split": "holdout",
+      "category": "fact_lookup",
+      "difficulty": "easy",
+      "tags": [
+        "holdout",
+        "numeric",
+        "2023",
+        "mortgage"
+      ],
+      "question": "Какими были размер ипотечного портфеля Сбера и его доля на рынке по итогам 2023 года?",
+      "filters": {
+        "years": [
+          2023
+        ],
+        "allowed_doc_ids": [
+          "sber_2023"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "Портфель ипотечных кредитов вырос на 34,9% до 10,2 трлн руб., доля на рынке увеличилась до 55,9%.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "mortgage_portfolio",
+            "metric_aliases": [
+              "ипотечный портфель",
+              "портфель ипотечных кредитов"
+            ],
+            "year": 2023,
+            "value": 10.2,
+            "unit": "трлн руб.",
+            "unit_aliases": [
+              "трлн рублей",
+              "трлн руб",
+              "трлн"
+            ],
+            "tolerance": 0.01
+          },
+          {
+            "metric": "mortgage_market_share",
+            "metric_aliases": [
+              "доля на рынке",
+              "доля"
+            ],
+            "year": 2023,
+            "value": 55.9,
+            "unit": "%",
+            "unit_aliases": [
+              "процент",
+              "процентов"
+            ],
+            "tolerance": 0.01
+          }
+        ],
+        "required_years": [
+          2023
+        ],
+        "required_documents": [
+          "sber_2023"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [
+          "размер портфеля",
+          "доля рынка",
+          "единица измерения"
+        ],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "mortgage_2023",
+            "any_of": [
+              "sber_2023:00048:c2:a83377c7ad16"
+            ],
+            "section": "Обращение к акционерам"
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 2,
+        "max_tool_calls": 4,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "ипотек",
+          "re:10[.,]2",
+          "re:55[.,]9"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "Отчёт за 2023 год, стр. 6: портфель 10,2 трлн руб., рост 34,9%, доля 55,9%. Вопрос спрашивает размер и долю, поэтому рост 34,9% остаётся в reference_answer как контекст, но не входит в required_facts (это была лишняя обязательная метрика вне вопроса). Holdout."
+    },
+    {
+      "id": "easy_010",
+      "suite": "easy",
+      "split": "holdout",
+      "category": "fact_lookup",
+      "difficulty": "easy",
+      "tags": [
+        "holdout",
+        "numeric",
+        "2016"
+      ],
+      "question": "Какая чистая прибыль Группы Сбербанк по МСФО за 2016 год?",
+      "filters": {
+        "years": [
+          2016
+        ],
+        "allowed_doc_ids": [
+          "sber_2016"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "Чистая прибыль Группы Сбербанк по МСФО за 2016 год составила 541,9 млрд руб.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "net_profit",
+            "metric_aliases": [
+              "чистая прибыль",
+              "прибыль"
+            ],
+            "year": 2016,
+            "value": 541.9,
+            "unit": "млрд руб.",
+            "unit_aliases": [
+              "млрд рублей",
+              "млрд руб",
+              "млрд RUB"
+            ],
+            "tolerance": 0.01
+          }
+        ],
+        "required_years": [
+          2016
+        ],
+        "required_documents": [
+          "sber_2016"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [
+          "значение",
+          "единица измерения"
+        ],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "net_profit_2016",
+            "any_of": [
+              "sber_2016:00480:c2:aadd91380839"
+            ],
+            "section": "Обзор рынка"
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 2,
+        "max_tool_calls": 4,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "чистая прибыль",
+          "re:541[.,]9"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "Отчёт за 2016 год, стр. 26: чистая прибыль по МСФО — 541,9 млрд руб. Holdout."
+    }
+  ]
+}

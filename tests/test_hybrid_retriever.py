@@ -9,11 +9,14 @@ from typing import Any, Mapping, Sequence
 import pytest
 
 from src.retrieval.hybrid_retriever import (
+    SECTION_FILTER_FALLBACK,
+    SECTION_YEAR_ABSENT,
     HybridRetriever,
     RerankResult,
     SearchFilters,
 )
 from src.retrieval.reranker import LLMReranker
+from src.retrieval.temporal_search import PerYearSearch
 
 
 def chunk(chunk_id: str, *, score: float, **metadata: Any) -> dict[str, Any]:
@@ -228,6 +231,32 @@ def test_diversity_prefers_distinct_sections() -> None:
     assert result.trace.diversity_removed >= 1
 
 
+def test_diversity_limits_are_soft_and_do_not_drop_recall() -> None:
+    dense = [
+        chunk("a1", score=4.0, section_path="A", doc_id="d1"),
+        chunk("a2", score=3.5, section_path="A", doc_id="d1"),
+        chunk("b1", score=3.0, section_path="B", doc_id="d2"),
+        chunk("b2", score=2.5, section_path="B", doc_id="d2"),
+        chunk("c1", score=2.0, section_path="C", doc_id="d3"),
+    ]
+    engine = HybridRetriever(
+        FakeIndex(dense),
+        FakeIndex(dense),
+        FakeEmbedder(),
+        top_k=4,
+        diversity=True,
+        max_per_doc=1,
+        max_per_section=1,
+    )
+
+    result = engine.retrieve("question")
+
+    # Первые два хита — из разных документов/разделов, затем добор.
+    assert [hit.chunk_id for hit in result.hits][:2] == ["a1", "b1"]
+    assert len(result.hits) == 4
+    assert result.trace.diversity_removed >= 2
+
+
 def test_retrieval_mode_can_use_only_one_channel() -> None:
     dense = [chunk("dense", score=1.0)]
     bm25 = [chunk("keyword", score=2.0)]
@@ -402,3 +431,186 @@ def test_both_channel_failures_return_no_results_with_warnings() -> None:
     assert result.hits == []
     assert result.trace.dense_failed and result.trace.bm25_failed
     assert len(result.warnings) >= 2
+
+
+def test_strict_section_hits_do_not_trigger_fallback() -> None:
+    docs = [
+        chunk("risk", score=3, year=2023, section_path="Риск"),
+        chunk("risk-child", score=2, year=2023, section_path="Риск/Кредитный"),
+    ]
+    engine, dense_index, bm25_index = retriever(docs, docs)
+
+    result = engine.retrieve(
+        "вопрос",
+        filters=SearchFilters(years={2023}, section_path_prefix="Риск"),
+    )
+
+    assert [hit.chunk_id for hit in result.hits] == ["risk", "risk-child"]
+    # Один строгий поиск: fallback не выполнялся.
+    assert len(dense_index.calls) == len(bm25_index.calls) == 1
+    assert SECTION_FILTER_FALLBACK not in result.warnings
+    assert result.trace.section_filter_status == "applied"
+    assert result.trace.section_filter_strict_hits == 2
+    assert result.trace.section_filter_corpus_matches == 2
+    assert "section_filter" not in result.trace.fallback
+
+
+def test_section_mismatch_falls_back_to_title_match_without_hard_filter() -> None:
+    docs = [
+        chunk(
+            "chunk",
+            score=1,
+            year=2023,
+            section_path="Сбер в цифрах и фактах/Ключевые результаты",
+        ),
+        chunk("unrelated", score=3, year=2023, section_path="Обзор рынка"),
+        chunk("wrong-year", score=5, year=2016, section_path="Ключевые результаты"),
+    ]
+    prefix = "Структура отчёта/Ключевые результаты"
+    engine, dense_index, bm25_index = retriever(docs, docs)
+
+    result = engine.retrieve(
+        "Как изменилась структура отчёта?",
+        filters=SearchFilters(years={2023}, section_path_prefix=prefix),
+    )
+
+    # Хиты пошли из поиска без section-фильтра, но год сохранён.
+    assert [hit.chunk_id for hit in result.hits] == ["chunk"]
+    assert all(hit.chunk["year"] == 2023 for hit in result.hits)
+    assert len(dense_index.calls) == len(bm25_index.calls) == 2
+    assert SECTION_FILTER_FALLBACK in result.warnings
+    assert any(
+        "section filter matched no chunks" in warning
+        for warning in result.warnings
+    )
+    # Fallback-хиты не выдаются за точное попадание в раздел.
+    assert result.effective_filters.section_path_prefix is None
+    assert result.trace.section_filter_status == "fallback_title"
+    assert result.trace.section_filter_prefix == prefix
+    assert result.trace.section_filter_strict_hits == 0
+    assert result.trace.section_filter_corpus_matches == 0
+    assert result.trace.section_filter_title == "Ключевые результаты"
+    assert result.trace.section_filter_title_hits == 1
+    assert result.trace.fallback["section_filter"] is True
+    assert result.trace.available["section_filter"] is False
+    assert result.trace.unavailable["section_filter"] == "fallback"
+    # trace описывает фактическую выдачу, а не отброшенные fallback-хиты.
+    assert result.trace.returned == 1
+    assert [item["chunk_id"] for item in result.trace.stages["returned"] or []] == [
+        "chunk"
+    ]
+    # Запрос fallback содержит title раздела (последний сегмент пути).
+    assert bm25_index.calls[1][0].startswith("Ключевые результаты")
+
+
+def test_section_fallback_without_title_match_keeps_all_hits() -> None:
+    docs = [
+        chunk("only", score=1, year=2016, section_path="Обзор рынка"),
+    ]
+    engine, _, _ = retriever(docs, docs)
+
+    result = engine.retrieve(
+        "вопрос",
+        filters=SearchFilters(
+            years={2016}, section_path_prefix="Портрет Группы/Достижения"
+        ),
+    )
+
+    assert [hit.chunk_id for hit in result.hits] == ["only"]
+    assert SECTION_FILTER_FALLBACK in result.warnings
+    assert any(
+        "searched without section_path_prefix" in warning
+        for warning in result.warnings
+    )
+    assert result.trace.section_filter_status == "fallback"
+    assert result.trace.section_filter_title == "Достижения"
+    assert result.trace.section_filter_title_hits == 0
+
+
+def test_section_fallback_does_not_duplicate_existing_title_in_query() -> None:
+    docs = [chunk("c1", score=1, year=2023, section_path="Другое")]
+    engine, _, bm25_index = retriever(docs, docs)
+    query = "Ключевые результаты: как изменилась структура?"
+
+    engine.retrieve(
+        query,
+        filters=SearchFilters(years={2023}, section_path_prefix="Отчёт/Ключевые результаты"),
+    )
+
+    assert bm25_index.calls[1][0] == query
+
+
+def test_empty_section_fallback_is_reported_as_fallback_empty() -> None:
+    engine, _, _ = retriever([], [])
+
+    result = engine.retrieve(
+        "вопрос",
+        filters=SearchFilters(section_path_prefix="Несуществующий раздел"),
+    )
+
+    assert result.hits == []
+    assert SECTION_FILTER_FALLBACK in result.warnings
+    assert result.trace.section_filter_status == "fallback_empty"
+    assert result.trace.section_filter_strict_hits == 0
+
+
+def test_section_without_requested_year_does_not_return_other_sections() -> None:
+    docs = [
+        chunk("risk-2019", score=1, year=2019, section_path="Риск"),
+        chunk("other-2023", score=5, year=2023, section_path="Обзор рынка"),
+    ]
+    engine, dense_index, bm25_index = retriever(docs, docs)
+
+    result = engine.retrieve(
+        "вопрос",
+        filters=SearchFilters(years={2023}, section_path_prefix="Риск"),
+    )
+
+    # Раздел в корпусе есть, но за 2023 год в нём нет чанков: чужие разделы
+    # не подставляются, fallback не выполняется.
+    assert result.hits == []
+    assert SECTION_YEAR_ABSENT in result.warnings
+    assert SECTION_FILTER_FALLBACK not in result.warnings
+    assert result.missing_years == [2023]
+    assert result.effective_filters.section_path_prefix == "Риск"
+    assert result.trace.section_filter_status == "year_absent"
+    assert result.trace.section_filter_corpus_matches == 1
+    assert result.trace.section_filter_prefix == "Риск"
+    assert len(dense_index.calls) == len(bm25_index.calls) == 1
+    assert any(
+        "no chunks for years" in warning for warning in result.warnings
+    )
+
+
+def test_factoid_query_without_section_runs_exactly_one_search() -> None:
+    docs = [chunk("c1", score=1, year=2023)]
+    engine, dense_index, bm25_index = retriever(docs, docs)
+
+    result = engine.retrieve("Какая чистая прибыль за 2023 год?")
+
+    assert [hit.chunk_id for hit in result.hits] == ["c1"]
+    assert len(dense_index.calls) == len(bm25_index.calls) == 1
+    assert result.warnings == []
+    assert result.trace.section_filter_status == "not_requested"
+    assert result.trace.section_filter_prefix is None
+
+
+def test_per_year_search_keeps_hits_and_warning_after_section_fallback() -> None:
+    docs = [
+        chunk("c2016", score=1, year=2016, section_path="Достижения"),
+        chunk("c2023", score=1, year=2023, section_path="Сбер сегодня"),
+    ]
+    engine, _, _ = retriever(docs, docs)
+    fanout = PerYearSearch(engine, per_year_k=1)
+
+    result = fanout.retrieve(
+        "Как изменилась структура отчёта?",
+        filters=SearchFilters(
+            years={2016, 2023},
+            section_path_prefix="Портрет Группы/Достижения",
+        ),
+    )
+
+    assert {hit.chunk["year"] for hit in result.hits} == {2016, 2023}
+    assert SECTION_FILTER_FALLBACK in result.warnings
+    assert result.trace.fallback["section_filter"] is True

@@ -20,6 +20,7 @@ from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT))
+sys.path.insert(0, str(PROJECT / "scripts"))
 
 
 def fingerprint(graph: object) -> str:
@@ -41,8 +42,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--graph", required=True, help="Существующий артефакт графа")
     parser.add_argument("--chunks", default=str(PROJECT / "data" / "dev" / "chunks"))
     parser.add_argument("--out-dir", default=str(PROJECT / "data" / "graph"))
-    parser.add_argument("--chunks-per-call", type=int, default=2)
+    parser.add_argument("--chunks-per-call", type=int, default=4)
     parser.add_argument("--max-retries", type=int, default=2)
+    parser.add_argument("--workers", type=int, default=3,
+                        help="Параллельных запросов к LLM (1–8; по умолчанию 3)")
+    parser.add_argument("--checkpoint", type=Path,
+                        default=PROJECT / "data" / "graph" / ".extraction_checkpoint.jsonl",
+                        help="JSONL-чекпоинт успешных пакетов")
     parser.add_argument("--model", default=os.getenv("LLM_MODEL", "GigaChat/GigaChat-3-Pro"))
     args = parser.parse_args(argv)
 
@@ -56,8 +62,9 @@ def main(argv: list[str] | None = None) -> int:
 
     import networkx as nx
 
+    from build_full_graph import _extract_parallel
+
     from src.core.corpus import load_chunks
-    from src.graph.entity_extractor import LLMEntityExtractor
     from src.graph.graph_builder import build_graph, load_graph, save_graph
     from src.graph.graph_models import GraphBuildConfig, GraphBuildResult
 
@@ -82,13 +89,15 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     client = OpenAI(api_key=api_key, base_url=base_url, timeout=90, max_retries=2)
-    extractor = LLMEntityExtractor(
-        client,
-        args.model,
+    extraction = _extract_parallel(
+        selected,
+        client=client,
+        model=args.model,
         max_retries=args.max_retries,
         chunks_per_call=args.chunks_per_call,
+        workers=args.workers,
+        checkpoint_path=args.checkpoint,
     )
-    extraction = extractor.extract(selected)
     print(f"Повторно извлечено: чанков {len(selected)}, "
           f"calls {extraction.calls}, entities {len(extraction.entities)}, "
           f"relations {len(extraction.relations)}, "

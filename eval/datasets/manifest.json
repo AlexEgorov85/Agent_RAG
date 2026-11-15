@@ -1,0 +1,26 @@
+{
+  "dataset_version": "1.1",
+  "status": "full_start_set",
+  "partial": false,
+  "created_at": "2026-11-15T00:00:00Z",
+  "expected_corpus_sha256": "64c9997e9ef5ee7bb5455bdd6c098d0736e8c9605b7e30f29197557eba719a8e",
+  "corpus_content_sha256": "64c9997e9ef5ee7bb5455bdd6c098d0736e8c9605b7e30f29197557eba719a8e",
+  "corpus_fingerprint": "26f393fef970297dda2eb4af93a1df29233e7084af60983d2ff074710924a549",
+  "corpus_fingerprint_source": "data/dev/cache/embeddings_26f393fef970297dda2eb4af93a1df29233e7084af60983d2ff074710924a549.json",
+  "corpus_fingerprint_reason": "Фактический fingerprint кэша для 1025 чанков: модель ai-sage/Giga-Embeddings-instruct-3B, query_prefix=query:. Меняется при переиндексации и не входит в content hash эталона.",
+  "chunk_count": 1025,
+  "documents": [
+    "sber_2016",
+    "sber_2017",
+    "sber_2022",
+    "sber_2023"
+  ],
+  "suite_hashes": {
+    "easy": "8776ad2acded47ca0f9979aca34b761e903f6784982e0e524d77c5d72cbd86ba",
+    "medium": "090975daa7ceaac82d8eab5e79e24233b14aab22faf0b78370adddf0a0fdda33",
+    "hard": "7e24d4d9f9f35f6955822cbdeb8b9f576ed21c16a1f87b344dbc739b94143030",
+    "multi_turn": "3fcb94ee6024014d11f227a4a8503d3be54420ab1b4394a39e28b27b4616aa15"
+  },
+  "dataset_sha256": "658afc0e72c0115b298727769d895af3f10d4ab2f7e11c9fcc42c539e660414a",
+  "notes": "Полный стартовый набор 30 тестов: 10 easy, 10 medium, 5 hard, 5 multi_turn. 12 smoke-тестов остаются dev; 6 holdout-тестов помечены split=holdout и не входят в smoke. Все gold_evidence — реальные chunk_id dev-корпуса (2016, 2017, 2022, 2023); 2021 используется только в abstain/gap-тесте. Hard и holdout требуют второго ревью. Уточнения по итогам smoke-триажа: hard_001 и medium_003 переформулированы без изменения эталонных ответов (снята двусмысленность), в hard_001 добавлены проверенные по тексту альтернативные gold-чанки (sber_2017:00342:c0, sber_2023:00403:c0). Триаж full-run: в medium_005 добавлены проверенные по тексту альтернативные gold-чанки прибыли (sber_2016:00156:c0, sber_2017:00684:c0); эталонные значения не менялись. Триаж full-run: в medium_005 добавлены проверенные по тексту альтернативные gold-чанки прибыли (sber_2016:00156:c0, sber_2017:00684:c0); эталонные значения не менялись."
+}

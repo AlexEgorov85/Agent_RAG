@@ -1,0 +1,563 @@
+{
+  "schema_version": "1.1",
+  "suite": "hard",
+  "expected_corpus_sha256": "64c9997e9ef5ee7bb5455bdd6c098d0736e8c9605b7e30f29197557eba719a8e",
+  "tests": [
+    {
+      "id": "hard_001",
+      "suite": "hard",
+      "split": "dev",
+      "category": "temporal",
+      "difficulty": "hard",
+      "tags": [
+        "smoke",
+        "multi_year",
+        "citation"
+      ],
+      "question": "Какая стратегия была утверждена в отчёте за 2017 год и какие направления технологической трансформации названы в отчёте за 2023 год?",
+      "filters": {
+        "years": [
+          2017,
+          2023
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "В отчёте за 2017 год утверждена Стратегия развития Сбербанка 2020; в отчёте за 2023 год ключевым направлением названа технологическая трансформация и замещение иностранного программного обеспечения собственными разработками.",
+      "expected": {
+        "required_facts": [],
+        "required_years": [
+          2017,
+          2023
+        ],
+        "required_documents": [
+          "sber_2017",
+          "sber_2023"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [
+          "Стратегия 2020",
+          "технологическая трансформация"
+        ],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "strategy_2017",
+            "any_of": [
+              "sber_2017:00342:c1:ef177943f37f",
+              "sber_2017:00342:c0:1643ad4eb41d"
+            ],
+            "section": "Корпоративное управление"
+          },
+          {
+            "id": "transformation_2023",
+            "any_of": [
+              "sber_2023:00078:c3:c5cc6e1f46e2",
+              "sber_2023:00403:c0:b9050bc6815c"
+            ],
+            "section": "Обращение к акционерам / Технологическое лидерство в 2023 году"
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 5,
+        "max_tool_calls": 8,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "стратег",
+          "трансформац"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "2017: стр. 9 — утверждена Стратегия развития Сбербанка 2020 (утверждение разорвано на два чанка c0/c1, оба проверены по тексту). 2023: стр. 8 — технологическая трансформация и замещение иностранного ПО; альтернативно стр. 17 «Технологическое лидерство в 2023 году» — вендорозамещение и миграция ИТ-ландшафта. Формулировка уточнена: «приоритетные направления 2023» двусмысленны (Стратегия 2026 vs обращение к акционерам), эталон не менялся. Требуется второе ревью hard-теста."
+    },
+    {
+      "id": "hard_002",
+      "suite": "hard",
+      "split": "dev",
+      "category": "structural",
+      "difficulty": "hard",
+      "tags": [
+        "smoke",
+        "esg",
+        "2023"
+      ],
+      "question": "Как Сбер управляет ESG-рисками?",
+      "filters": {
+        "years": [
+          2023
+        ],
+        "allowed_doc_ids": [
+          "sber_2023"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "В кредитном процессе используется Интегральный инструмент оценки ESG-рисков корпоративных клиентов.",
+      "expected": {
+        "required_facts": [],
+        "required_years": [
+          2023
+        ],
+        "required_documents": [
+          "sber_2023"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [
+          "ESG-риски",
+          "кредитный процесс"
+        ],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "esg_risk_2023",
+            "any_of": [
+              "sber_2023:00495:c0:bc41e332f7fa"
+            ],
+            "section": "Управление рисками"
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 5,
+        "max_tool_calls": 8,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk",
+          "get_structure_tree"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "ESG"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "Фрагмент отчёта за 2023 год, стр. 19: Интегральный инструмент оценки ESG-рисков корпоративных клиентов. Требуется второе ревью hard-теста."
+    },
+    {
+      "id": "hard_003",
+      "suite": "hard",
+      "split": "dev",
+      "category": "structural",
+      "difficulty": "hard",
+      "tags": [
+        "structural",
+        "2022",
+        "2023",
+        "risks"
+      ],
+      "question": "Сравните структуру и содержание раздела об управлении рисками в отчётах за 2022 и 2023 годы.",
+      "filters": {
+        "years": [
+          2022,
+          2023
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "Раздел сохранён и расширен: в 2022 году описана адаптация системы управления рисками к кризисным вызовам и ESG-риски, в 2023 году добавлены климатические риски и цифровой кредитный процесс.",
+      "expected": {
+        "required_facts": [],
+        "required_years": [
+          2022,
+          2023
+        ],
+        "required_documents": [
+          "sber_2022",
+          "sber_2023"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [
+          "раздел сохранён",
+          "ESG-риски",
+          "климатические риски",
+          "изменение структуры"
+        ],
+        "required_calculations": [],
+        "required_structural_changes": [
+          {
+            "type": "restructured",
+            "section": "Управление рисками",
+            "from_doc": "sber_2022",
+            "to_doc": "sber_2023"
+          }
+        ],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "risks_2022",
+            "any_of": [
+              "sber_2022:00166:c0:bf9e4c8f95de",
+              "sber_2022:00166:c1:622fdfebb7fd"
+            ],
+            "section": "Управление рисками"
+          },
+          {
+            "id": "risks_2023",
+            "any_of": [
+              "sber_2023:00495:c0:bc41e332f7fa",
+              "sber_2023:00495:c1:3931c8308058",
+              "sber_2023:00495:c2:d9d10e87f074"
+            ],
+            "section": "Сбер в цифрах и фактах/Управление рисками в 2023 году"
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 5,
+        "max_tool_calls": 8,
+        "must_use_tools": [
+          "get_structure_tree"
+        ],
+        "must_use_tools_strict": true,
+        "may_use_tools": [
+          "search_reports",
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "риск",
+          "esg",
+          "климат"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "Структура проверена по section_path чанков: в 2022 году — «Управление рисками», в 2023 году — «Управление рисками в 2023 году» с климатическими рисками. Structural diff — навигация, не доказательство содержания."
+    },
+    {
+      "id": "hard_004",
+      "suite": "hard",
+      "split": "dev",
+      "category": "multi_hop",
+      "difficulty": "hard",
+      "tags": [
+        "strategy",
+        "financials",
+        "2023",
+        "multi_hop"
+      ],
+      "question": "Сопоставьте финансовые результаты 2023 года с приоритетами Стратегии 2026: какие показатели и направления названы в отчёте?",
+      "filters": {
+        "years": [
+          2023
+        ],
+        "allowed_doc_ids": [
+          "sber_2023"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "В отчёте названы прибыль 1 508,6 млрд руб., ROE 25,3% и CET1 13,2%, а среди приоритетов Стратегии 2026 — человекоцентричность, ИИ нового поколения и цифровая трансформация.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "net_profit",
+            "metric_aliases": [
+              "чистая прибыль",
+              "прибыль"
+            ],
+            "year": 2023,
+            "value": 1508.6,
+            "unit": "млрд руб.",
+            "unit_aliases": [
+              "млрд рублей",
+              "млрд руб",
+              "млрд RUB"
+            ],
+            "tolerance": 0.01
+          },
+          {
+            "metric": "roe",
+            "metric_aliases": [
+              "roe",
+              "рентабельность капитала"
+            ],
+            "year": 2023,
+            "value": 25.3,
+            "unit": "%",
+            "unit_aliases": [
+              "процент",
+              "процентов"
+            ],
+            "tolerance": 0.01
+          },
+          {
+            "metric": "cet1",
+            "metric_aliases": [
+              "cet1",
+              "достаточность базового капитала"
+            ],
+            "year": 2023,
+            "value": 13.2,
+            "unit": "%",
+            "unit_aliases": [
+              "процент",
+              "процентов"
+            ],
+            "tolerance": 0.01
+          }
+        ],
+        "required_years": [
+          2023
+        ],
+        "required_documents": [
+          "sber_2023"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [
+          "прибыль",
+          "ROE",
+          "CET1",
+          "связь со Стратегией 2026"
+        ],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "profit_2023",
+            "any_of": [
+              "sber_2023:00078:c3:c5cc6e1f46e2",
+              "sber_2023:00524:c0:d8c805e18e7f"
+            ],
+            "section": "Обращение к акционерам"
+          },
+          {
+            "id": "roe_cet1_2023",
+            "any_of": [
+              "sber_2023:00136:c1:3335c25de148"
+            ],
+            "section": "Сбер в цифрах и фактах/Культура выполнения ключевых стратегических целей"
+          },
+          {
+            "id": "strategy_2026",
+            "any_of": [
+              "sber_2023:00585:c0:73c877d84551",
+              "sber_2023:00078:c7:0166ca347b6e"
+            ],
+            "section": "Сбер в цифрах и фактах/Долгосрочное видение и Стратегия 2026"
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 5,
+        "max_tool_calls": 8,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "стратег",
+          "2026",
+          "re:1\\s?50[89](?:[.,]\\d+)?|1[.,]5\\s*трлн"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "2023: стр. 8 — прибыль 1 508,6 млрд руб. и ROE 25,3%; стр. 12 — CET1 13,2%; стр. 21 — Стратегия 2026. Требуется второе ревью hard-теста. Триаж full-run: в gold группы profit_2023 добавлена сопоставимая таблица стр. 20 (sber_2023:00524:c0) — она содержит то же значение прибыли 1 509 млрд руб.; must_mention принимает эквивалентные записи 1 508,6 / 1 509 / 1,5 трлн, а evaluator сравнивает единицы с учётом масштаба."
+    },
+    {
+      "id": "hard_005",
+      "suite": "hard",
+      "split": "holdout",
+      "category": "multi_hop",
+      "difficulty": "hard",
+      "tags": [
+        "holdout",
+        "2023",
+        "credit_risk",
+        "numeric"
+      ],
+      "question": "Какие показатели управления кредитным риском и цифровизации кредитования зафиксированы в отчёте за 2023 год?",
+      "filters": {
+        "years": [
+          2023
+        ],
+        "allowed_doc_ids": [
+          "sber_2023"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "Стоимость риска составила 0,8 п.п.; 94% выдач потребительских кредитов проходит в СберБанк Онлайн; запущен цифровой кредитный процесс для корпоративных клиентов.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "cost_of_risk",
+            "metric_aliases": [
+              "стоимость риска",
+              "cor"
+            ],
+            "year": 2023,
+            "value": 0.8,
+            "unit": "п.п.",
+            "unit_aliases": [
+              "п.п.",
+              "пункта",
+              "процентных пункта"
+            ],
+            "tolerance": 0.01
+          },
+          {
+            "metric": "digital_consumer_lending_share",
+            "metric_aliases": [
+              "выдач потребительского кредитования",
+              "онлайн"
+            ],
+            "year": 2023,
+            "value": 94.0,
+            "unit": "%",
+            "unit_aliases": [
+              "процент",
+              "процентов"
+            ],
+            "tolerance": 0.01
+          }
+        ],
+        "required_years": [
+          2023
+        ],
+        "required_documents": [
+          "sber_2023"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [
+          "стоимость риска",
+          "цифровой кредитный процесс",
+          "доля онлайн-выдач"
+        ],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "cost_of_risk_2023",
+            "any_of": [
+              "sber_2023:00570:c0:b9792dcb5db5"
+            ],
+            "section": "Сбер в цифрах и фактах/Ключевые финансовые результаты"
+          },
+          {
+            "id": "digital_credit_process_2023",
+            "any_of": [
+              "sber_2023:00495:c1:3931c8308058",
+              "sber_2023:00495:c2:d9d10e87f074"
+            ],
+            "section": "Сбер в цифрах и фактах/Управление рисками в 2023 году"
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 5,
+        "max_tool_calls": 8,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "риск",
+          "re:0[.,]8",
+          "re:94"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "2023: стр. 20 — COR 0,8 п.п.; стр. 19 — цифровой кредитный процесс и 94% онлайн-выдач. Holdout, требуется второе ревью."
+    }
+  ]
+}

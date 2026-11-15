@@ -1,0 +1,939 @@
+{
+  "schema_version": "1.1",
+  "suite": "multi_turn",
+  "expected_corpus_sha256": "64c9997e9ef5ee7bb5455bdd6c098d0736e8c9605b7e30f29197557eba719a8e",
+  "tests": [
+    {
+      "id": "multi_turn_001",
+      "suite": "multi_turn",
+      "split": "dev",
+      "category": "dialogue",
+      "difficulty": "medium",
+      "tags": [
+        "smoke",
+        "period",
+        "clarification"
+      ],
+      "dialogue_policy": {
+        "missing_period": "clarify"
+      },
+      "turns": [
+        {
+          "question": "Как менялась чистая прибыль Сбербанка?",
+          "behavior": "clarify_period",
+          "expected_status": "abstain",
+          "expected": {
+            "required_facts": [],
+            "required_years": [],
+            "required_documents": [],
+            "required_answer_elements": [
+              "уточнение периода"
+            ],
+            "required_calculations": [],
+            "required_structural_changes": [],
+            "missing_years": [],
+            "reason_codes": [
+              "clarification_required"
+            ]
+          },
+          "gold_evidence": {
+            "min_coverage": 0.0,
+            "groups": []
+          },
+          "expected_behavior": {
+            "retrieval_modes": [
+              "hybrid"
+            ],
+            "max_search_calls": 0,
+            "max_tool_calls": 2,
+            "must_use_tools": [],
+            "must_use_tools_strict": false,
+            "may_use_tools": [],
+            "must_not_use_tools": [
+              "search_reports"
+            ],
+            "strict_search_budget": true,
+            "must_cite_sources": false,
+            "must_abstain_if_missing": true
+          },
+          "checks": {
+            "must_mention": [
+              "период"
+            ],
+            "must_not_mention": [],
+            "forbidden_values": [],
+            "forbidden_years": [],
+            "expected_warnings": [
+              "clarification_required"
+            ],
+            "must_not_invent_values": true,
+            "strict_quotes": false
+          }
+        },
+        {
+          "question": "За 2023 год.",
+          "behavior": "continue_previous_request",
+          "expected_status": "answer",
+          "expected": {
+            "required_facts": [
+              {
+                "metric": "net_profit",
+                "metric_aliases": [
+                  "чистая прибыль",
+                  "прибыль"
+                ],
+                "year": 2023,
+                "value": 1508.6,
+                "unit": "млрд руб.",
+                "unit_aliases": [
+                  "млрд рублей",
+                  "млрд руб",
+                  "млрд RUB"
+                ],
+                "tolerance": 0.01
+              }
+            ],
+            "required_years": [
+              2023
+            ],
+            "required_documents": [
+              "sber_2023"
+            ],
+            "required_issuers": [],
+            "required_answer_elements": [
+              "значение",
+              "единица измерения"
+            ],
+            "required_calculations": [],
+            "required_structural_changes": [],
+            "missing_years": []
+          },
+          "gold_evidence": {
+            "min_coverage": 1.0,
+            "groups": [
+              {
+                "id": "net_profit_2023",
+                "any_of": [
+                  "sber_2023:00078:c3:c5cc6e1f46e2"
+                ],
+                "section": "Финансовые результаты"
+              }
+            ]
+          },
+          "expected_behavior": {
+            "retrieval_modes": [
+              "hybrid"
+            ],
+            "max_search_calls": 3,
+            "max_tool_calls": 6,
+            "must_use_tools": [
+              "search_reports"
+            ],
+            "must_use_tools_strict": false,
+            "may_use_tools": [
+              "get_chunk"
+            ],
+            "must_not_use_tools": [],
+            "strict_search_budget": false,
+            "must_cite_sources": true,
+            "must_abstain_if_missing": true
+          },
+          "checks": {
+            "must_mention": [
+              "чистая прибыль"
+            ],
+            "must_not_mention": [],
+            "forbidden_values": [],
+            "forbidden_years": [],
+            "expected_warnings": [],
+            "must_not_invent_values": true,
+            "strict_quotes": false
+          }
+        }
+      ],
+      "scenario_checks": [
+        "context_preserved",
+        "correct_metric",
+        "correct_period",
+        "no_unnecessary_restart",
+        "sources_preserved",
+        "clarification_asked"
+      ],
+      "required_checks": [
+        "context_preserved",
+        "correct_metric",
+        "correct_period",
+        "no_unnecessary_restart",
+        "sources_preserved",
+        "clarification_asked"
+      ],
+      "notes": "Проверяется политика clarify: первый turn не должен начинать поиск без периода, второй — уточняет 2023 год. Источник прибыли — стр. 8."
+    },
+    {
+      "id": "multi_turn_002",
+      "suite": "multi_turn",
+      "split": "dev",
+      "category": "dialogue",
+      "difficulty": "medium",
+      "tags": [
+        "smoke",
+        "metric_change",
+        "2023"
+      ],
+      "turns": [
+        {
+          "question": "Какая чистая прибыль Сбербанка за 2023 год?",
+          "behavior": "continue_previous_request",
+          "expected_status": "answer",
+          "expected": {
+            "required_facts": [
+              {
+                "metric": "net_profit",
+                "metric_aliases": [
+                  "чистая прибыль",
+                  "прибыль"
+                ],
+                "year": 2023,
+                "value": 1508.6,
+                "unit": "млрд руб.",
+                "unit_aliases": [
+                  "млрд рублей",
+                  "млрд руб",
+                  "млрд RUB"
+                ],
+                "tolerance": 0.01
+              }
+            ],
+            "required_years": [
+              2023
+            ],
+            "required_documents": [
+              "sber_2023"
+            ],
+            "required_issuers": [],
+            "required_answer_elements": [
+              "значение",
+              "единица измерения"
+            ],
+            "required_calculations": [],
+            "required_structural_changes": [],
+            "missing_years": []
+          },
+          "gold_evidence": {
+            "min_coverage": 1.0,
+            "groups": [
+              {
+                "id": "net_profit_2023",
+                "any_of": [
+                  "sber_2023:00078:c3:c5cc6e1f46e2"
+                ],
+                "section": "Финансовые результаты"
+              }
+            ]
+          },
+          "expected_behavior": {
+            "retrieval_modes": [
+              "hybrid"
+            ],
+            "max_search_calls": 3,
+            "max_tool_calls": 6,
+            "must_use_tools": [
+              "search_reports"
+            ],
+            "must_use_tools_strict": false,
+            "may_use_tools": [
+              "get_chunk"
+            ],
+            "must_not_use_tools": [],
+            "strict_search_budget": false,
+            "must_cite_sources": true,
+            "must_abstain_if_missing": true
+          },
+          "checks": {
+            "must_mention": [
+              "чистая прибыль"
+            ],
+            "must_not_mention": [],
+            "forbidden_values": [],
+            "forbidden_years": [],
+            "expected_warnings": [],
+            "must_not_invent_values": true,
+            "strict_quotes": false
+          }
+        },
+        {
+          "question": "Не чистую прибыль, а рентабельность капитала за 2023 год.",
+          "behavior": "change_metric",
+          "expected_status": "answer",
+          "expected": {
+            "required_facts": [
+              {
+                "metric": "roe",
+                "metric_aliases": [
+                  "roe",
+                  "рентабельность капитала"
+                ],
+                "year": 2023,
+                "value": 25.3,
+                "unit": "%",
+                "unit_aliases": [
+                  "процент",
+                  "процентов"
+                ],
+                "tolerance": 0.01
+              }
+            ],
+            "required_years": [
+              2023
+            ],
+            "required_documents": [
+              "sber_2023"
+            ],
+            "required_issuers": [],
+            "required_answer_elements": [
+              "значение",
+              "единица измерения"
+            ],
+            "required_calculations": [],
+            "required_structural_changes": [],
+            "missing_years": []
+          },
+          "gold_evidence": {
+            "min_coverage": 1.0,
+            "groups": [
+              {
+                "id": "roe_2023",
+                "any_of": [
+                  "sber_2023:00078:c3:c5cc6e1f46e2",
+                  "sber_2023:00136:c1:3335c25de148"
+                ],
+                "section": "Финансовые результаты"
+              }
+            ]
+          },
+          "expected_behavior": {
+            "retrieval_modes": [
+              "hybrid"
+            ],
+            "max_search_calls": 3,
+            "max_tool_calls": 6,
+            "must_use_tools": [
+              "search_reports"
+            ],
+            "must_use_tools_strict": false,
+            "may_use_tools": [
+              "get_chunk"
+            ],
+            "must_not_use_tools": [],
+            "strict_search_budget": false,
+            "must_cite_sources": true,
+            "must_abstain_if_missing": true
+          },
+          "checks": {
+            "must_mention": [
+              "25,3"
+            ],
+            "must_not_mention": [],
+            "forbidden_values": [],
+            "forbidden_years": [],
+            "expected_warnings": [],
+            "must_not_invent_values": true,
+            "strict_quotes": false
+          }
+        }
+      ],
+      "scenario_checks": [
+        "context_preserved",
+        "correct_metric",
+        "correct_period",
+        "no_unnecessary_restart",
+        "sources_preserved"
+      ],
+      "required_checks": [
+        "context_preserved",
+        "correct_metric",
+        "correct_period",
+        "no_unnecessary_restart",
+        "sources_preserved"
+      ],
+      "notes": "Смена показателя: период 2023 сохраняется, метрика меняется с чистой прибыли на ROE. Источники — стр. 8 и 12."
+    },
+    {
+      "id": "multi_turn_003",
+      "suite": "multi_turn",
+      "split": "dev",
+      "category": "dialogue",
+      "difficulty": "hard",
+      "tags": [
+        "contradiction",
+        "2022",
+        "recheck"
+      ],
+      "dialogue_policy": {
+        "missing_period": "clarify"
+      },
+      "turns": [
+        {
+          "question": "Какая чистая прибыль Группы Сбербанк за 2022 год по отчёту за 2022 год?",
+          "behavior": "continue_previous_request",
+          "expected_status": "answer",
+          "expected": {
+            "required_facts": [
+              {
+                "metric": "net_profit",
+                "metric_aliases": [
+                  "чистая прибыль",
+                  "прибыль"
+                ],
+                "year": 2022,
+                "value": 270.5,
+                "unit": "млрд руб.",
+                "unit_aliases": [
+                  "млрд рублей",
+                  "млрд руб",
+                  "млрд RUB"
+                ],
+                "tolerance": 0.01
+              }
+            ],
+            "required_years": [
+              2022
+            ],
+            "required_documents": [
+              "sber_2022"
+            ],
+            "required_issuers": [],
+            "required_answer_elements": [
+              "значение",
+              "единица измерения"
+            ],
+            "required_calculations": [],
+            "required_structural_changes": [],
+            "missing_years": []
+          },
+          "gold_evidence": {
+            "min_coverage": 1.0,
+            "groups": [
+              {
+                "id": "net_profit_2022_report",
+                "any_of": [
+                  "sber_2022:01329:c0:83784885ef86"
+                ],
+                "section": "Обзор результатов/Динамика основных показателей Сбера"
+              }
+            ]
+          },
+          "expected_behavior": {
+            "retrieval_modes": [
+              "hybrid"
+            ],
+            "max_search_calls": 3,
+            "max_tool_calls": 6,
+            "must_use_tools": [
+              "search_reports"
+            ],
+            "must_use_tools_strict": false,
+            "may_use_tools": [
+              "get_chunk"
+            ],
+            "must_not_use_tools": [],
+            "strict_search_budget": false,
+            "must_cite_sources": true,
+            "must_abstain_if_missing": true
+          },
+          "checks": {
+            "must_mention": [
+              "чистая прибыль",
+              "re:270[.,]5"
+            ],
+            "must_not_mention": [],
+            "forbidden_values": [],
+            "forbidden_years": [],
+            "expected_warnings": [],
+            "must_not_invent_values": true,
+            "strict_quotes": false
+          }
+        },
+        {
+          "question": "В отчёте за 2023 год за 2022 год указано другое значение. Проверь оба первоисточника и покажи, какое значение в каком отчёте.",
+          "behavior": "recheck_primary_source",
+          "expected_status": "answer",
+          "expected": {
+            "required_facts": [],
+            "required_years": [
+              2022,
+              2023
+            ],
+            "required_documents": [
+              "sber_2022",
+              "sber_2023"
+            ],
+            "required_issuers": [],
+            "required_answer_elements": [
+              "значение из отчёта за 2022 год",
+              "значение из отчёта за 2023 год",
+              "указание источника для каждого значения"
+            ],
+            "required_calculations": [],
+            "required_structural_changes": [],
+            "missing_years": []
+          },
+          "gold_evidence": {
+            "min_coverage": 1.0,
+            "groups": [
+              {
+                "id": "profit_2022_in_2022_report",
+                "any_of": [
+                  "sber_2022:01329:c0:83784885ef86"
+                ],
+                "section": "Обзор результатов/Динамика основных показателей Сбера"
+              },
+              {
+                "id": "profit_2022_in_2023_report",
+                "any_of": [
+                  "sber_2023:00524:c0:d8c805e18e7f"
+                ],
+                "section": "Сбер в цифрах и фактах/Ключевые финансовые результаты"
+              }
+            ]
+          },
+          "expected_behavior": {
+            "retrieval_modes": [
+              "hybrid"
+            ],
+            "max_search_calls": 3,
+            "max_tool_calls": 6,
+            "must_use_tools": [],
+            "must_use_tools_strict": false,
+            "may_use_tools": [
+              "search_reports",
+              "get_chunk"
+            ],
+            "must_not_use_tools": [],
+            "strict_search_budget": false,
+            "must_cite_sources": true,
+            "must_abstain_if_missing": true
+          },
+          "checks": {
+            "must_mention": [
+              "re:270[.,]5",
+              "re:288",
+              "2022",
+              "2023"
+            ],
+            "must_not_mention": [],
+            "forbidden_values": [],
+            "forbidden_years": [],
+            "expected_warnings": [],
+            "must_not_invent_values": true,
+            "strict_quotes": false
+          }
+        }
+      ],
+      "scenario_checks": [
+        "context_preserved",
+        "correct_metric",
+        "correct_period",
+        "no_unnecessary_restart",
+        "sources_preserved",
+        "contradiction_rechecked"
+      ],
+      "required_checks": [
+        "context_preserved",
+        "correct_metric",
+        "correct_period",
+        "contradiction_rechecked",
+        "sources_preserved"
+      ],
+      "notes": "Противоречие в значении чистой прибыли за 2022 год: 270,5 млрд руб. в отчёте за 2022 год (стр. 60) и 288 млрд руб. в сопоставимой таблице отчёта за 2023 год (стр. 20). Ожидается открытие обоих первоисточников, а не выбор значения наугад. Триаж full-run: конкретный инструмент get_chunk не обязателен — поведение подтверждается цитатами из обоих документов и обоими значениями в ответе (см. contradiction_rechecked)."
+    },
+    {
+      "id": "multi_turn_004",
+      "suite": "multi_turn",
+      "split": "dev",
+      "category": "dialogue",
+      "difficulty": "medium",
+      "tags": [
+        "risks",
+        "2023",
+        "deepening"
+      ],
+      "dialogue_policy": {
+        "missing_period": "clarify"
+      },
+      "turns": [
+        {
+          "question": "Как в Сбере организовано управление рисками в 2023 году?",
+          "behavior": "continue_previous_request",
+          "expected_status": "answer",
+          "expected": {
+            "required_facts": [],
+            "required_years": [
+              2023
+            ],
+            "required_documents": [
+              "sber_2023"
+            ],
+            "required_issuers": [],
+            "required_answer_elements": [
+              "ESG-риски",
+              "кредитный процесс",
+              "система управления рисками"
+            ],
+            "required_calculations": [],
+            "required_structural_changes": [],
+            "missing_years": []
+          },
+          "gold_evidence": {
+            "min_coverage": 1.0,
+            "groups": [
+              {
+                "id": "risk_management_2023",
+                "any_of": [
+                  "sber_2023:00495:c0:bc41e332f7fa"
+                ],
+                "section": "Сбер в цифрах и фактах/Управление рисками в 2023 году"
+              }
+            ]
+          },
+          "expected_behavior": {
+            "retrieval_modes": [
+              "hybrid"
+            ],
+            "max_search_calls": 3,
+            "max_tool_calls": 6,
+            "must_use_tools": [
+              "search_reports"
+            ],
+            "must_use_tools_strict": false,
+            "may_use_tools": [
+              "get_chunk"
+            ],
+            "must_not_use_tools": [],
+            "strict_search_budget": false,
+            "must_cite_sources": true,
+            "must_abstain_if_missing": true
+          },
+          "checks": {
+            "must_mention": [
+              "риск",
+              "esg"
+            ],
+            "must_not_mention": [],
+            "forbidden_values": [],
+            "forbidden_years": [],
+            "expected_warnings": [],
+            "must_not_invent_values": true,
+            "strict_quotes": false
+          }
+        },
+        {
+          "question": "Какие климатические риски банк учитывает и как оценивает потери от них?",
+          "behavior": "continue_previous_request",
+          "expected_status": "answer",
+          "expected": {
+            "required_facts": [],
+            "required_years": [
+              2023
+            ],
+            "required_documents": [
+              "sber_2023"
+            ],
+            "required_issuers": [],
+            "required_answer_elements": [
+              "физические климатические риски",
+              "модель оценки экономических потерь"
+            ],
+            "required_calculations": [],
+            "required_structural_changes": [],
+            "missing_years": []
+          },
+          "gold_evidence": {
+            "min_coverage": 1.0,
+            "groups": [
+              {
+                "id": "climate_risks_2023",
+                "any_of": [
+                  "sber_2023:00495:c1:3931c8308058",
+                  "sber_2023:00495:c2:d9d10e87f074"
+                ],
+                "section": "Сбер в цифрах и фактах/Управление рисками в 2023 году"
+              }
+            ]
+          },
+          "expected_behavior": {
+            "retrieval_modes": [
+              "hybrid"
+            ],
+            "max_search_calls": 3,
+            "max_tool_calls": 6,
+            "must_use_tools": [
+              "search_reports"
+            ],
+            "must_use_tools_strict": false,
+            "may_use_tools": [
+              "get_chunk"
+            ],
+            "must_not_use_tools": [],
+            "strict_search_budget": false,
+            "must_cite_sources": true,
+            "must_abstain_if_missing": true
+          },
+          "checks": {
+            "must_mention": [
+              "климат",
+              "потер"
+            ],
+            "must_not_mention": [],
+            "forbidden_values": [],
+            "forbidden_years": [],
+            "expected_warnings": [],
+            "must_not_invent_values": true,
+            "strict_quotes": false
+          }
+        }
+      ],
+      "scenario_checks": [
+        "context_preserved",
+        "correct_metric",
+        "correct_period",
+        "no_unnecessary_restart",
+        "sources_preserved",
+        "evidence_not_lost"
+      ],
+      "required_checks": [
+        "context_preserved",
+        "correct_metric",
+        "correct_period",
+        "no_unnecessary_restart",
+        "sources_preserved"
+      ],
+      "notes": "Углубление по разделу рисков: второй turn остаётся в том же разделе и документе, но сужает тему до климатических рисков. Источник — стр. 19 отчёта за 2023 год."
+    },
+    {
+      "id": "multi_turn_005",
+      "suite": "multi_turn",
+      "split": "holdout",
+      "category": "dialogue",
+      "difficulty": "medium",
+      "tags": [
+        "holdout",
+        "comparison",
+        "2022",
+        "2023"
+      ],
+      "dialogue_policy": {
+        "missing_period": "default_period"
+      },
+      "turns": [
+        {
+          "question": "Каков размер розничного кредитного портфеля Сбера в 2023 году?",
+          "behavior": "continue_previous_request",
+          "expected_status": "answer",
+          "expected": {
+            "required_facts": [
+              {
+                "metric": "retail_loan_portfolio",
+                "metric_aliases": [
+                  "розничный кредитный портфель",
+                  "розничный портфель"
+                ],
+                "year": 2023,
+                "value": 16.1,
+                "unit": "трлн руб.",
+                "unit_aliases": [
+                  "трлн рублей",
+                  "трлн руб",
+                  "трлн"
+                ],
+                "tolerance": 0.01
+              }
+            ],
+            "required_years": [
+              2023
+            ],
+            "required_documents": [
+              "sber_2023"
+            ],
+            "required_issuers": [],
+            "required_answer_elements": [
+              "значение",
+              "единица измерения"
+            ],
+            "required_calculations": [],
+            "required_structural_changes": [],
+            "missing_years": []
+          },
+          "gold_evidence": {
+            "min_coverage": 1.0,
+            "groups": [
+              {
+                "id": "retail_portfolio_2023",
+                "any_of": [
+                  "sber_2023:00569:c0:ad35e78af9aa",
+                  "sber_2023:00227:c0:1662185de5df"
+                ],
+                "section": "Сбер в цифрах и фактах/Ключевые финансовые результаты"
+              }
+            ]
+          },
+          "expected_behavior": {
+            "retrieval_modes": [
+              "hybrid"
+            ],
+            "max_search_calls": 3,
+            "max_tool_calls": 6,
+            "must_use_tools": [
+              "search_reports"
+            ],
+            "must_use_tools_strict": false,
+            "may_use_tools": [
+              "get_chunk"
+            ],
+            "must_not_use_tools": [],
+            "strict_search_budget": false,
+            "must_cite_sources": true,
+            "must_abstain_if_missing": true
+          },
+          "checks": {
+            "must_mention": [
+              "розничн",
+              "re:16[.,]1"
+            ],
+            "must_not_mention": [],
+            "forbidden_values": [],
+            "forbidden_years": [],
+            "expected_warnings": [],
+            "must_not_invent_values": true,
+            "strict_quotes": false
+          }
+        },
+        {
+          "question": "А каким он был в 2022 году и насколько вырос?",
+          "behavior": "compare_with_previous_year",
+          "expected_status": "answer",
+          "expected": {
+            "required_facts": [
+              {
+                "metric": "retail_loan_portfolio",
+                "metric_aliases": [
+                  "розничный кредитный портфель",
+                  "розничный портфель"
+                ],
+                "year": 2022,
+                "value": 12.4,
+                "unit": "трлн руб.",
+                "unit_aliases": [
+                  "трлн рублей",
+                  "трлн руб",
+                  "трлн"
+                ],
+                "tolerance": 0.01
+              },
+              {
+                "metric": "retail_loan_growth",
+                "metric_aliases": [
+                  "рост розничного кредитного портфеля",
+                  "рост розничного портфеля",
+                  "темп роста розничного портфеля"
+                ],
+                "year": 2023,
+                "value": 29.3,
+                "unit": "%",
+                "unit_aliases": [
+                  "процент",
+                  "процентов"
+                ],
+                "tolerance": 0.01
+              }
+            ],
+            "required_years": [
+              2022,
+              2023
+            ],
+            "required_documents": [
+              "sber_2022",
+              "sber_2023"
+            ],
+            "required_issuers": [],
+            "required_answer_elements": [
+              "значение за 2022",
+              "темп роста",
+              "сравнение с 2023"
+            ],
+            "required_calculations": [],
+            "required_structural_changes": [],
+            "missing_years": []
+          },
+          "gold_evidence": {
+            "min_coverage": 1.0,
+            "groups": [
+              {
+                "id": "retail_portfolio_2022",
+                "any_of": [
+                  "sber_2022:00336:c0:d3602799be9c"
+                ],
+                "section": "Экосистема В2С. Розничный бизнес"
+              },
+              {
+                "id": "retail_portfolio_2023",
+                "any_of": [
+                  "sber_2023:00569:c0:ad35e78af9aa",
+                  "sber_2023:00227:c0:1662185de5df"
+                ],
+                "section": "Сбер в цифрах и фактах/Ключевые финансовые результаты"
+              }
+            ]
+          },
+          "expected_behavior": {
+            "retrieval_modes": [
+              "hybrid"
+            ],
+            "max_search_calls": 3,
+            "max_tool_calls": 6,
+            "must_use_tools": [
+              "search_reports"
+            ],
+            "must_use_tools_strict": false,
+            "may_use_tools": [
+              "get_chunk"
+            ],
+            "must_not_use_tools": [],
+            "strict_search_budget": false,
+            "must_cite_sources": true,
+            "must_abstain_if_missing": true
+          },
+          "checks": {
+            "must_mention": [
+              "2022",
+              "re:12[.,]4",
+              "re:29[.,]3"
+            ],
+            "must_not_mention": [],
+            "forbidden_values": [],
+            "forbidden_years": [],
+            "expected_warnings": [],
+            "must_not_invent_values": true,
+            "strict_quotes": false
+          }
+        }
+      ],
+      "scenario_checks": [
+        "context_preserved",
+        "correct_metric",
+        "correct_period",
+        "no_unnecessary_restart",
+        "sources_preserved",
+        "no_reask"
+      ],
+      "required_checks": [
+        "context_preserved",
+        "correct_metric",
+        "correct_period",
+        "no_unnecessary_restart",
+        "sources_preserved"
+      ],
+      "notes": "Сравнение с предыдущим годом: показатель тот же, добавляется 2022 год. 2022: стр. 22 — 12,4 трлн руб.; 2023: стр. 20 — 16,1 трлн руб. и рост 29,3%. Holdout."
+    }
+  ]
+}

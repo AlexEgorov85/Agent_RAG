@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping, Sequence
+from threading import local
 from typing import Any
 
 from src.agent.state import Answer, Citation
@@ -43,9 +44,12 @@ SAFE_WARNING_CODES = frozenset(
         "structure_unavailable",
         "structure_scope_limited",
         "structure_content_unverified",
+        "structural_claim_without_citation",
         "conflicting_values",
         "unit_mismatch",
         "citation_outside_manifest",
+        "fact_not_supported",
+        "quote_truncated",
     }
 )
 
@@ -107,6 +111,58 @@ def _optional_int(value: Any) -> int | None:
     return value
 
 
+#: Числовой токен факта: «1 508,6», «25,3%», «0,8», «(1 234)».
+_FACT_NUMBER = re.compile(
+    r"[-−–—]?"
+    r"(?:\d{1,3}(?:[ \u00a0]\d{3})+(?:[.,]\d+)?"
+    r"|\d+(?:[.,]\d+)*)"
+)
+
+
+def _numeric_values(text: str) -> list[float]:
+    values: list[float] = []
+    for match in _FACT_NUMBER.finditer(str(text or "")):
+        raw = (
+            match.group(0)
+            .replace("\u00a0", "")
+            .replace(" ", "")
+            .replace("−", "-")
+            .replace("–", "-")
+            .replace("—", "-")
+            .replace(",", ".")
+        )
+        try:
+            values.append(float(raw))
+        except ValueError:
+            continue
+    return values
+
+
+def _value_in_source(value_text: str, source_text: str) -> bool:
+    """Число факта встречается в тексте цитируемого источника.
+
+    Сверка намеренно консервативная и не заменяет ``verify_answer``: она
+    отбрасывает факт, число которого модель взяла не из citation, чтобы
+    необоснованный факт не ронял весь ответ на повторной генерации.
+    """
+    numbers = _numeric_values(value_text)
+    if not numbers:
+        return True
+    source_numbers = _numeric_values(source_text)
+    return any(
+        abs(value - candidate) <= max(0.005, abs(candidate) * 1e-6)
+        for value in numbers
+        for candidate in source_numbers
+    )
+
+
+def _source_text(evidence: Mapping[str, Any], chunk_id: str) -> str:
+    source = evidence.get(chunk_id)
+    if not isinstance(source, Mapping):
+        return ""
+    return f"{source.get('text') or ''} {source.get('html') or ''}"
+
+
 def _safe_warnings(values: Sequence[Any]) -> list[str]:
     warnings: list[str] = []
     for value in values:
@@ -133,7 +189,7 @@ class AnswerGenerator:
         model: str,
         temperature: float = 0,
         max_tokens: int = DEFAULT_MAX_TOKENS,
-        max_retries: int = 1,
+        max_retries: int = 2,
         *,
         max_context_chars: int = DEFAULT_MAX_CONTEXT_CHARS,
         max_context_tokens: int | None = None,
@@ -175,6 +231,23 @@ class AnswerGenerator:
         self.max_retries = max_retries
         self.max_context_chars = max_context_chars
         self.max_context_tokens = max_context_tokens
+        # Диагностика упаковки последнего вызова в текущем потоке. Публичный
+        # ``Answer`` не меняется: это наблюдаемость для AgentService.
+        self._context_state = local()
+
+    @property
+    def last_context_chunk_ids(self) -> list[str] | None:
+        """ID чанков, реально упакованных в контекст последнего ``generate``.
+
+        ``None`` означает, что генератор в этом потоке ещё не вызывался (или
+        вернулся до упаковки контекста). Пустой список — валидный результат:
+        контекст был собран, но ни один чанк не поместился в бюджет.
+        """
+        value = getattr(self._context_state, "chunk_ids", None)
+        return list(value) if isinstance(value, list) else None
+
+    def _set_context_chunk_ids(self, value: list[str] | None) -> None:
+        self._context_state.chunk_ids = value
 
     def generate(
         self,
@@ -189,10 +262,14 @@ class AnswerGenerator:
         structural_changes: Sequence[Mapping[str, Any]] | None = None,
         section_matches: Sequence[Mapping[str, Any]] | None = None,
         missing_years: Sequence[int] | None = None,
+        coverage: Any = None,
     ) -> Answer:
         """Возвращает проверенный ответ или безопасный abstain; текст провайдера не всплывает."""
         if not isinstance(question, str):
             raise TypeError("question must be a string")
+        # Сбрасываем диагностику прошлого вызова: список относится только к
+        # текущему контексту.
+        self._set_context_chunk_ids(None)
         manifest = {
             item
             for item in evidence_manifest
@@ -224,10 +301,12 @@ class AnswerGenerator:
             max_chars=self.max_context_chars,
             max_tokens=self.max_context_tokens,
         )
+        self._set_context_chunk_ids(list(packed.context_chunk_ids))
         if not packed.records:
             return Answer("abstain", NO_EVIDENCE_TEXT, warnings=["no_evidence"])
 
         analysis_context: dict[str, Any] = {}
+        structural_available = bool(structural_changes)
         if answer_mode in {"concise", "comparison", "outline"}:
             analysis_context["answer_mode"] = answer_mode
         if missing_years:
@@ -246,6 +325,12 @@ class AnswerGenerator:
                 for item in list(section_matches)[:40]
                 if isinstance(item, Mapping)
             ]
+        if coverage is not None:
+            to_dict = getattr(coverage, "to_dict", None)
+            if callable(to_dict):
+                analysis_context["coverage"] = to_dict()
+            elif isinstance(coverage, Mapping):
+                analysis_context["coverage"] = dict(coverage)
 
         user_prompt = build_user_prompt(
             question,
@@ -253,6 +338,19 @@ class AnswerGenerator:
             history=history,
             repair=repair or diagnostics is not None,
             analysis_context=analysis_context or None,
+            repair_diagnostics=diagnostics,
+        )
+        # Повтор с тем же промптом при temperature=0 часто воспроизводит ту же
+        # невалидную схему. Со второй попытки добавляем repair-инструкцию,
+        # чтобы модель пересобрала ответ, а не повторила ошибку. Диагностика
+        # передаётся только кодами/ID: см. sanitize_repair_diagnostics.
+        retry_prompt = build_user_prompt(
+            question,
+            packed.records,
+            history=history,
+            repair=True,
+            analysis_context=analysis_context or None,
+            repair_diagnostics=diagnostics,
         )
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -261,17 +359,28 @@ class AnswerGenerator:
 
         completions = self.client.chat.completions
         create = getattr(completions, "create", completions)
-        for _attempt in range(self.max_retries + 1):
+        for attempt in range(self.max_retries + 1):
+            attempt_messages = messages
+            if attempt > 0 and not repair:
+                attempt_messages = [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": retry_prompt},
+                ]
             try:
                 response = create(
                     model=self.model,
-                    messages=messages,
+                    messages=attempt_messages,
                     temperature=self.temperature,
                     response_format={"type": "json_object"},
                     max_tokens=self.max_tokens,
                 )
                 payload = _parse_json(_response_content(response))
-                return self._to_answer(payload, packed.evidence, manifest)
+                return self._to_answer(
+                    payload,
+                    packed.evidence,
+                    manifest,
+                    allow_uncited_structural=structural_available,
+                )
             except Exception:
                 # Намеренно не сохраняем и не показываем текст провайдера/исключения.
                 continue
@@ -305,6 +414,8 @@ class AnswerGenerator:
         payload: Mapping[str, Any],
         evidence: Mapping[str, Mapping[str, Any]],
         manifest: set[str],
+        *,
+        allow_uncited_structural: bool = False,
     ) -> Answer:
         status = payload.get("status")
         if status not in {"answer", "abstain"}:
@@ -341,6 +452,7 @@ class AnswerGenerator:
         citations: list[Citation] = []
         seen: set[str] = set()
         dropped = False
+        truncated_quote = False
         for item in raw_citations:
             if not isinstance(item, Mapping):
                 raise _SchemaError("each citation must be an object")
@@ -358,14 +470,34 @@ class AnswerGenerator:
             if quote is not None and not isinstance(quote, str):
                 raise _SchemaError("citation quote must be a string")
             if isinstance(quote, str) and len(quote) > MAX_QUOTE_CHARS:
-                raise _SchemaError("citation quote is too long")
+                # Длинная цитата не должна ронять весь ответ: обрезаем её
+                # до лимита и честно сообщаем об этом warning'ом.
+                quote = quote[:MAX_QUOTE_CHARS].rstrip()
+                truncated_quote = True
             citations.append(cls._citation(chunk_id, quote, evidence))
             seen.add(chunk_id)
         if not citations:
+            # Навигационный структурный ответ: модель явно пометила, что
+            # цитат по содержанию нет, и не привела фактов. Цитаты не
+            # выдумываются; для остальных режимов ответ без цитат запрещён.
+            if (
+                allow_uncited_structural
+                and not raw_facts
+                and "structural_claim_without_citation" in raw_warnings
+            ):
+                warnings = _safe_warnings(raw_warnings)
+                if "structural_claim_without_citation" not in warnings:
+                    warnings.append("structural_claim_without_citation")
+                return Answer(
+                    "answer",
+                    answer_text.strip(),
+                    warnings=warnings,
+                )
             raise _SchemaError("answer requires at least one valid citation")
 
         cited = {citation.chunk_id for citation in citations}
         facts: list[dict[str, Any]] = []
+        dropped_fact = False
         for item in raw_facts:
             if not isinstance(item, Mapping):
                 raise _SchemaError("each fact must be an object")
@@ -375,15 +507,35 @@ class AnswerGenerator:
                 not isinstance(reference, str) or reference not in cited
                 for reference in references
             ):
-                raise _SchemaError("every fact must reference a returned citation")
+                # Факт, который ссылается на отброшенную/чужую citation, не
+                # может быть подтверждён. Раньше это была SchemaError и весь
+                # ответ уходил в повторную генерацию/abstain; безопаснее
+                # сохранить подтверждённую часть и пометить потерю явно.
+                dropped_fact = True
+                continue
             claim = item.get("claim")
             if claim is not None and (not isinstance(claim, str) or not claim.strip()):
                 raise _SchemaError("fact claim must be a non-empty string")
+            value = item.get("value")
+            if value is not None:
+                source_text = " ".join(
+                    _source_text(evidence, reference)
+                    for reference in references
+                    if isinstance(reference, str)
+                )
+                if source_text and not _value_in_source(str(value), source_text):
+                    # Число не найдено в цитируемом чанке — факт необоснован.
+                    dropped_fact = True
+                    continue
             facts.append(dict(item))
 
         warnings = _safe_warnings(raw_warnings)
         if dropped and "citation_outside_manifest" not in warnings:
             warnings.append("citation_outside_manifest")
+        if dropped_fact and "fact_not_supported" not in warnings:
+            warnings.append("fact_not_supported")
+        if truncated_quote and "quote_truncated" not in warnings:
+            warnings.append("quote_truncated")
         return Answer(
             "answer",
             answer_text.strip(),

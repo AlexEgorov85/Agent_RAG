@@ -1,0 +1,209 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --thread-max-width: 44rem;
+  --canvas: 246 245 242;
+  --surface: 255 255 255;
+  --raised: 249 248 245;
+  --line: 224 221 213;
+  --ink: 27 29 33;
+  --muted: 103 107 116;
+  --accent: 15 100 100;
+  --accent-soft: 224 240 238;
+  --accent-ink: 255 255 255;
+  --danger: 174 49 49;
+  --warn: 158 100 14;
+}
+
+.dark {
+  --canvas: 20 21 24;
+  --surface: 27 29 33;
+  --raised: 33 36 41;
+  --line: 52 56 62;
+  --ink: 235 236 238;
+  --muted: 154 159 168;
+  --accent: 94 200 195;
+  --accent-soft: 27 54 54;
+  --accent-ink: 15 23 23;
+  --danger: 236 120 120;
+  --warn: 226 174 84;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-canvas text-ink antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+
+  ::selection {
+    background: rgb(var(--accent) / 0.22);
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(var(--accent) / 0.7);
+    outline-offset: 2px;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--line)) transparent;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md border border-line bg-surface px-3 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-raised disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply border-transparent bg-accent text-accent-ink hover:bg-accent/90 disabled:hover:bg-accent;
+  }
+
+  .btn-ghost {
+    @apply border-transparent bg-transparent text-muted hover:bg-raised hover:text-ink;
+  }
+
+  .btn-danger {
+    @apply border-transparent bg-danger text-white hover:bg-danger/90;
+  }
+
+  .field {
+    @apply w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-muted/70 focus:border-accent/60 focus:outline-none focus:ring-2 focus:ring-accent/20;
+  }
+
+  .panel-title {
+    @apply text-[11px] font-semibold uppercase tracking-[0.14em] text-muted;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-line bg-raised px-2 py-0.5 text-xs text-muted;
+  }
+
+  /* Markdown rendered inside chat messages. Raw HTML never reaches this layer. */
+  .md {
+    @apply text-[15px] leading-relaxed text-ink;
+  }
+
+  .md > * + * {
+    @apply mt-3;
+  }
+
+  .md h1,
+  .md h2,
+  .md h3 {
+    @apply font-semibold leading-snug text-ink;
+  }
+
+  .md h1 {
+    @apply text-xl;
+  }
+
+  .md h2 {
+    @apply text-lg;
+  }
+
+  .md h3 {
+    @apply text-base;
+  }
+
+  .md p {
+    @apply whitespace-pre-wrap;
+  }
+
+  .md ul {
+    @apply list-disc space-y-1 pl-5;
+  }
+
+  .md ol {
+    @apply list-decimal space-y-1 pl-5;
+  }
+
+  .md a {
+    @apply text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent;
+  }
+
+  .md strong {
+    @apply font-semibold text-ink;
+  }
+
+  .md blockquote {
+    @apply border-l-2 border-line pl-3 text-muted;
+  }
+
+  .md code {
+    @apply rounded bg-raised px-1 py-0.5 font-mono text-[0.85em];
+  }
+
+  .md pre {
+    @apply overflow-x-auto rounded-lg border border-line bg-raised p-3 font-mono text-[13px];
+  }
+
+  .md pre code {
+    @apply bg-transparent p-0;
+  }
+
+  .md table {
+    @apply w-full border-collapse text-sm;
+  }
+
+  .md th {
+    @apply border-b border-line bg-raised px-2 py-1.5 text-left font-semibold;
+  }
+
+  .md td {
+    @apply border-b border-line/70 px-2 py-1.5 align-top;
+  }
+
+  .md hr {
+    @apply border-line;
+  }
+
+  .scroll-area {
+    @apply overflow-y-auto overscroll-contain;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes drawer-in {
+  from {
+    opacity: 0.6;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.fade-up {
+  animation: fade-up 180ms ease-out both;
+}
+
+.drawer-in {
+  animation: drawer-in 180ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-up,
+  .drawer-in {
+    animation: none;
+  }
+}

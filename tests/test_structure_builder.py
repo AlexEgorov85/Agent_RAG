@@ -380,3 +380,100 @@ def test_build_from_elements_file_missing_raises(tmp_path) -> None:
 
     with pytest.raises(FileNotFoundError):
         build_from_elements_file(tmp_path / "nope_elements.json")
+
+
+# ------------------- 2016–2018: калибровка, части, плоские закладки -------------
+
+def test_toc_printed_page_offset_calibrated_via_body_titles() -> None:
+    """2016: печатные страницы TOC смещены на +3 относительно PDF."""
+    rows = "".join(
+        f"<tr><td>{name}</td><td>{printed}</td></tr>"
+        for name, printed in [
+            ("Сбербанк сегодня", 4), ("Достижения", 6),
+            ("Обзор рынка", 26), ("Стратегия и ее реализация", 33),
+            ("Управление рисками", 198),
+        ])
+    elements = [
+        element("Оглавление", page=5),
+        RawElement(element_id="sber_2016:toc", doc_id="sber_2016",
+                   type="Table", page=5, text="",
+                   html=f"<table>{rows}</table>"),
+        # Тело: те же заголовки на PDF-страницах printed+3
+        element("Сбербанк сегодня", page=7, doc_id="sber_2016"),
+        element("Достижения", page=9, doc_id="sber_2016"),
+        element("Обзор рынка", page=29, doc_id="sber_2016"),
+        element("Стратегия и ее реализация", page=36, doc_id="sber_2016"),
+        element("Управление рисками", page=201, doc_id="sber_2016"),
+    ]
+    structure = build_document_structure(
+        elements, "sber_2016", toc=parse_toc_entries(elements))
+    assert [(s.title, s.page_start) for s in structure.sections] == [
+        ("Сбербанк сегодня", 7), ("Достижения", 9),
+        ("Обзор рынка", 29), ("Стратегия и ее реализация", 36),
+        ("Управление рисками", 201)]
+
+
+def test_toc_group_becomes_parent_section() -> None:
+    """Часть TOC («01. Портрет Группы») — level 0, её строки — level 1."""
+    rows = "".join(
+        f"<tr><td>{name}</td><td>{page}</td></tr>"
+        for name, page in [
+            ("Сбербанк сегодня", 4), ("Достижения", 6),
+            ("Ключевые результаты", 8), ("Стратегия Группы", 10),
+            ("Корпоративное управление", 12),
+        ])
+    elements = [
+        element("Оглавление", page=3),
+        element("01. Портрет Группы", page=3),
+        RawElement(element_id="sber_2017:toc", doc_id="sber_2017",
+                   type="Table", page=3, text="",
+                   html=f"<table>{rows}</table>"),
+        element("Сбербанк сегодня", page=4, doc_id="sber_2017"),
+        element("Достижения", page=6, doc_id="sber_2017"),
+        element("Ключевые результаты", page=8, doc_id="sber_2017"),
+        element("Стратегия Группы", page=10, doc_id="sber_2017"),
+        element("Корпоративное управление", page=12, doc_id="sber_2017"),
+    ]
+    structure = build_document_structure(
+        elements, "sber_2017", toc=parse_toc_entries(elements))
+    assert structure.sections[0].title == "01. Портрет Группы"
+    assert structure.sections[0].level == 0
+    assert [s.level for s in structure.sections[1:]] == [1] * 5
+    assert structure.sections[1].breadcrumbs == [
+        "01. Портрет Группы", "Сбербанк сегодня"]
+
+
+def test_flat_outline_levels_inferred_from_numbering() -> None:
+    """2018: закладки одного уровня → уровни по нумерации частей."""
+    outline = [{"title": "1 Портрет Группы", "level": 0, "page": 5}]
+    outline += [{"title": f"Раздел портрета {index}", "level": 0,
+                 "page": 6 + index} for index in range(8)]
+    outline += [{"title": "2 Стратегический отчет", "level": 0, "page": 20}]
+    outline += [{"title": f"Раздел стратегии {index}", "level": 0,
+                 "page": 21 + index} for index in range(8)]
+    outline += [{"title": "3.1 Клиентский опыт", "level": 0, "page": 40},
+                {"title": "Розничные клиенты", "level": 0, "page": 41}]
+    structure = build_document_structure(
+        [element("Обзор рынка", page=100)], "sber_2018", outline=outline)
+    levels = {s.title: s.level for s in structure.sections}
+    assert levels["1 Портрет Группы"] == 0
+    assert levels["Раздел портрета 0"] == 1
+    assert levels["2 Стратегический отчет"] == 0
+    assert levels["3.1 Клиентский опыт"] == 1
+    assert levels["Розничные клиенты"] == 2
+
+
+
+def test_toc_body_page_after_toc_not_excluded() -> None:
+    """Страницы тела сразу после TOC не считаются страницами оглавления."""
+    elements = [
+        element("Оглавление", page=5),
+        RawElement(element_id="sber_2016:toc", doc_id="sber_2016",
+                   type="Table", page=5, text="",
+                   html="<table><tr><td>Раздел .......</td><td>7</td></tr>"
+                        "<tr><td>Второй .......</td><td>9</td></tr></table>"),
+        element("Первый раздел тела", page=6, doc_id="sber_2016"),
+    ]
+    from src.ingestion.structure_builder import _toc_page_numbers
+
+    assert _toc_page_numbers(elements) == {5}

@@ -142,6 +142,12 @@ def test_base_only_when_graph_is_empty():
     assert result.trace.graph_candidates == 0
     assert result.trace.graph_added == 0
     assert result.trace.graph_failed is False
+    # Пустой граф — это отсутствие индекса, а не ноль измеренных кандидатов.
+    assert result.trace.stages["graph"] is None
+    assert result.trace.available["graph"] is False
+    assert result.trace.unavailable["graph"] == "no_index"
+    assert result.trace.fallback["graph"] is True
+    assert any("graph_unavailable" in w for w in result.warnings)
 
 
 def test_graph_only_chunks_are_appended_after_base_hits():
@@ -165,6 +171,18 @@ def test_graph_only_chunks_are_appended_after_base_hits():
     assert "graph_added=1" in result.warnings
     assert result.trace.graph_results[0]["chunk_id"] in {"c1", "c2"}
     assert result.trace.graph_matched_entities == [ENTITY_ID]
+    # Этап graph измерен: кандидаты с рангом, скором и путём-объяснением.
+    stage = result.trace.stages["graph"]
+    assert stage is not None
+    assert [item["rank"] for item in stage] == [1, 2]
+    assert {item["chunk_id"] for item in stage} == {"c1", "c2"}
+    assert all("path" in item and "evidence_chunk_ids" in item for item in stage)
+    assert result.trace.available["graph"] is True
+    assert "graph" not in result.trace.unavailable
+    assert result.trace.fallback["graph"] is False
+    # Provenance: primary — только c1, графовый c2 ждёт подтверждения.
+    assert retriever.evidence_manifest(result) == ["c1"]
+    assert retriever.graph_evidence_manifest(result) == ["c2"]
 
 
 def test_dedupe_keeps_base_position_and_orders_graph_only_by_score(monkeypatch):
@@ -201,11 +219,13 @@ def test_top_k_is_applied_after_merge():
     result = retriever.retrieve("credit risk", top_k=3)
     assert [item.chunk_id for item in result.hits] == ["c1", "c3", "c2"]
     assert result.trace.graph_added == 1
+    assert result.trace.graph_added_chunk_ids == ["c2"]
     assert base.calls[-1]["top_k"] == 3
 
     result = retriever.retrieve("credit risk", top_k=1)
     assert [item.chunk_id for item in result.hits] == ["c1"]
     assert result.trace.graph_added == 0
+    assert result.trace.graph_added_chunk_ids == []
 
     result = retriever.retrieve("credit risk", top_k=None)
     assert [item.chunk_id for item in result.hits] == ["c1", "c3", "c2"]
@@ -290,6 +310,9 @@ def test_no_entities_does_not_call_graph_retrieval(monkeypatch):
     assert [item.chunk_id for item in result.hits] == ["c1"]
     assert result.trace.graph_candidates == 0
     assert result.trace.graph_added == 0
+    assert result.trace.unavailable["graph"] == "no_candidates"
+    assert result.trace.stages["graph"] is None
+    assert result.trace.fallback["graph"] is True
 
 
 def test_broken_graph_falls_back_to_base_with_warning():
@@ -302,9 +325,14 @@ def test_broken_graph_falls_back_to_base_with_warning():
     assert result.hits[0].rrf_score == 0.02
     assert "base-only warning" in result.warnings
     assert "graph_candidates=0" in result.warnings
-    assert any("Graph retrieval unavailable" in warning for warning in result.warnings)
+    assert any("graph_unavailable: graph_failed" in warning
+               for warning in result.warnings)
     assert result.trace.graph_failed is True
     assert result.trace.graph_error_type == "RuntimeError"
+    assert result.trace.stages["graph"] is None
+    assert result.trace.available["graph"] is False
+    assert result.trace.unavailable["graph"] == "graph_failed"
+    assert result.trace.fallback["graph"] is True
 
 
 def test_missing_chunk_store_entry_is_skipped():
@@ -318,6 +346,12 @@ def test_missing_chunk_store_entry_is_skipped():
     assert result.trace.graph_skipped_missing_chunks == 1
     assert result.trace.graph_added == 0
     assert "graph_skipped_missing_chunks=1" in result.warnings
+    # Кандидаты графа измерены, даже если свидетельство не материализовано.
+    assert [item["chunk_id"] for item in (result.trace.stages["graph"] or [])] == [
+        "c1", "c2",
+    ]
+    assert retriever.evidence_manifest(result) == ["c1"]
+    assert retriever.graph_evidence_manifest(result) == []
 
 
 def test_graph_candidate_must_pass_kind_filter():

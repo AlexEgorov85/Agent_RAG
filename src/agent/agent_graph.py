@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import inspect
+import math
 import re
 import time
 import uuid
@@ -17,7 +18,17 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.agent.selector import PlanAwareSelector, content_attempt_key
+from src.agent.coverage import (
+    build_coverage,
+    extract_metrics,
+    normalize_metric,
+)
+from src.agent.selector import (
+    PlanAwareSelector,
+    aspect_search_candidates,
+    content_attempt_key,
+    plan_section_path,
+)
 from src.agent.state import AgentAction, AgentState, Answer, QueryPlan, ToolEvent
 from src.agent.tools import (
     AgentTools,
@@ -34,20 +45,70 @@ from src.engine.structure_compare import (
 from src.retrieval.hybrid_retriever import SearchFilters
 
 #: Бюджеты — защитный механизм, а не основной способ управления исследованием.
-MAX_TOOL_CALLS = 8
-MAX_SEARCH_CALLS = 5
+#: ``spec_agent.md`` §3.1: не более 4 tool calls и 2 поисков за turn.
+MAX_TOOL_CALLS = 4
+MAX_SEARCH_CALLS = 2
 
-_METRIC_TERMS = (
-    "прибыль",
-    "выручка",
-    "roe",
-    "roa",
-    "актив",
-    "капитал",
-    "доход",
-    "расход",
-    "маржа",
+#: Политика clarify: temporal-вопрос с показателем, но без периода в самом
+#: вопросе/фильтрах/истории, не даёт корректного сравнения. Такой запрос
+#: уточняется до поиска, а не превращается в abstain «no_evidence».
+_EXPLICIT_YEAR = re.compile(r"\b(?:18|19|20|21)\d{2}\b")
+_EXPLICIT_PERIOD = re.compile(
+    r"(?:\b(?:18|19|20|21)\d{2}\s*[-–—]\s*(?:18|19|20|21)\d{2}\b|"
+    r"\bс\s+(?:18|19|20|21)\d{2}\b|"
+    r"\bпо\s+(?:18|19|20|21)\d{2}\b|"
+    r"\bпоследн\w+\s+(?:\d+\s+)?(?:год|лет)\w*|"
+    r"\bза\s+все\s+(?:годы|время)\w*|"
+    r"\bвесь\s+период\b|\bпо\s+всем\s+годам\b|"
+    r"\bгод\s+к\s+году\b|\bг/г\b|"
+    r"\bпрошл\w+\s+год\w*|\bпозапрошл\w+\s+год\w*)",
+    re.I,
 )
+_TREND_QUESTION = re.compile(
+    r"\b(?:менял|измен|динамик|тренд|эволюц|сравн)\w*",
+    re.I,
+)
+_STRUCTURAL_QUESTION = re.compile(
+    r"(?i)\b(?:структур\w*|подраздел\w*|оглавлен\w*|дерев\w*|"
+    r"раздел\w*|оглавлен\w*)"
+)
+
+
+def _has_explicit_period(text: str) -> bool:
+    """Есть ли в тексте явный год, диапазон или относительный период."""
+    return bool(_EXPLICIT_YEAR.search(text) or _EXPLICIT_PERIOD.search(text))
+
+
+def _clarification_prompt(state: AgentState) -> str | None:
+    """Текст уточнения периода или ``None``, если запрос можно искать.
+
+    Уточнение запрашивается только для trend/temporal-вопроса с показателем,
+    когда период не задан ни пользовательскими фильтрами, ни самим вопросом,
+    ни историей диалога. Это защищает от подмены периода «всем корпусом».
+    """
+    plan = state.get("query_plan") or QueryPlan()
+    question = state.get("question", "")
+    if plan.intent not in {"temporal", "multi_hop"}:
+        return None
+    if not plan.required_metrics:
+        return None
+    if not (plan.requires_comparison or _TREND_QUESTION.search(question)):
+        return None
+    if _requested_years(state.get("filters") or SearchFilters()):
+        return None
+    if _has_explicit_period(question):
+        return None
+    for item in state.get("history", []) or []:
+        if not isinstance(item, Mapping):
+            continue
+        content = item.get("content")
+        if isinstance(content, str) and _has_explicit_period(content):
+            return None
+    return (
+        "Уточните, пожалуйста, период: за какой год или диапазон лет "
+        "показать динамику? Например, «за 2022–2023 годы» или «за 2023 год»."
+    )
+
 
 
 class Router(Protocol):
@@ -108,7 +169,36 @@ def _as_plan(value: Any) -> QueryPlan:
         return QueryPlan()
     if plan.section_filter is not None and not isinstance(plan.section_filter, str):
         return QueryPlan()
-    return plan
+    if (
+        not isinstance(plan.aspects, list)
+        or any(not isinstance(item, str) for item in plan.aspects)
+        or not isinstance(plan.required_metrics, list)
+        or not isinstance(plan.requires_comparison, bool)
+    ):
+        return QueryPlan()
+
+    aspects = [
+        item.strip() for item in plan.aspects if item.strip()
+    ][:4]
+    metrics: list[str] = []
+    for item in plan.required_metrics:
+        metric = normalize_metric(item)
+        if metric is not None and metric not in metrics:
+            metrics.append(metric)
+    metrics = metrics[:5]
+    year_count = len(plan.years)
+    if plan.year_from is not None and plan.year_to is not None:
+        year_count = max(year_count, plan.year_to - plan.year_from + 1)
+    return replace(
+        plan,
+        aspects=aspects,
+        required_metrics=metrics,
+        requires_comparison=(
+            plan.requires_comparison
+            or plan.answer_mode == "comparison"
+            or year_count > 1
+        ),
+    )
 
 
 def _filters_with_plan(explicit: SearchFilters, plan: QueryPlan) -> SearchFilters:
@@ -150,7 +240,7 @@ def _filters_with_plan(explicit: SearchFilters, plan: QueryPlan) -> SearchFilter
         section_path_prefix=(
             explicit.section_path_prefix
             if explicit.section_path_prefix is not None
-            else plan.section_filter
+            else plan_section_path(plan.section_filter)
         ),
         breadcrumb_contains=explicit.breadcrumb_contains,
         max_section_level=explicit.max_section_level,
@@ -179,6 +269,108 @@ def _graph_evidence_ids(value: Any) -> set[str]:
 
     visit(value)
     return found
+
+
+def _trace_value(value: Any, name: str) -> Any:
+    """Читает поле trace из результата поиска (объект или словарь)."""
+    trace = value.get("trace") if isinstance(value, Mapping) else getattr(
+        value, "trace", None
+    )
+    if isinstance(trace, Mapping):
+        return trace.get(name)
+    return getattr(trace, name, None)
+
+
+def _graph_added_chunk_ids(value: Any) -> set[str]:
+    """ID graph-only чанков: они ждут подтверждения и не являются primary."""
+    raw = _trace_value(value, "graph_added_chunk_ids")
+    if not isinstance(raw, (list, tuple, set, frozenset)):
+        return set()
+    return {str(item) for item in raw if isinstance(item, str) and item}
+
+
+def _graph_score(value: Any) -> float | None:
+    """Конечная графовая оценка или ``None``, если она не измерена."""
+    if isinstance(value, bool):
+        return None
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return None
+    return score if math.isfinite(score) else None
+
+
+def _graph_entity_diagnostics(result: Any) -> dict[str, Any] | None:
+    """Собирает diagnostics ``get_entities`` из ``result["results"]``.
+
+    Этап ``graph`` публикуется только по фактическим результатам: пустой
+    ответ не получает выдуманных хитов или рангов.
+    """
+    if not isinstance(result, Mapping):
+        return None
+    raw_results = result.get("results")
+    items = (
+        [item for item in raw_results if isinstance(item, Mapping)]
+        if isinstance(raw_results, (list, tuple))
+        else []
+    )
+    raw_evidence = result.get("evidence_chunk_ids")
+    evidence_ids = (
+        [str(item) for item in raw_evidence if isinstance(item, str) and item]
+        if isinstance(raw_evidence, (list, tuple, set, frozenset))
+        else []
+    )
+    raw_nodes = result.get("nodes")
+    nodes = (
+        [str(item) for item in raw_nodes if isinstance(item, str) and item]
+        if isinstance(raw_nodes, (list, tuple, set, frozenset))
+        else []
+    )
+
+    stage: list[dict[str, Any]] = []
+    for item in items:
+        chunk_id = item.get("chunk_id")
+        if not isinstance(chunk_id, str) or not chunk_id:
+            continue
+        path = item.get("path")
+        path_ids = (
+            [str(entry) for entry in path]
+            if isinstance(path, (list, tuple))
+            else []
+        )
+        item_evidence = item.get("evidence_chunk_ids")
+        evidence = (
+            [str(entry) for entry in item_evidence]
+            if isinstance(item_evidence, (list, tuple, set, frozenset))
+            else []
+        )
+        stage.append(
+            {
+                "chunk_id": chunk_id,
+                "rank": len(stage) + 1,
+                "score": _graph_score(item.get("graph_score")),
+                "path": path_ids,
+                "evidence_chunk_ids": evidence,
+            }
+        )
+
+    if not stage and not evidence_ids and not nodes:
+        # Совсем пустой результат: не публикуем синтетический этап.
+        return None
+
+    added_ids = {entry["chunk_id"] for entry in stage} | set(evidence_ids)
+    candidates = len(stage) if stage else len(evidence_ids)
+    measured = bool(stage or evidence_ids)
+    return {
+        "stages": {"graph": stage} if stage else {},
+        "available": {"graph": measured},
+        "fallback": {"graph": not measured},
+        "unavailable": {} if measured else {"graph": "no_candidates"},
+        "counts": {"graph": candidates},
+        "graph_candidates": candidates,
+        "graph_added": len(added_ids),
+        "graph_matched_entities": nodes,
+    }
 
 
 def _contained_chunk_id(chunk: Any) -> str | None:
@@ -351,20 +543,76 @@ def _fact_year(fact: Any) -> int | None:
     return None
 
 
-def _metric_terms(question: str) -> list[str]:
-    text = question.casefold()
-    return [term for term in _METRIC_TERMS if term in text]
-
-
-def _chunk_mentions_metric(chunk: Any, terms: list[str]) -> bool:
-    if not terms:
+def _coverage_has_actionable_gaps(state: AgentState, coverage: Any) -> bool:
+    """Есть ли gap, который можно закрыть новым поиском с учётом попыток."""
+    missing_cells = getattr(coverage, "missing_cells", None)
+    if not callable(missing_cells):
+        return False
+    attempted_years: set[int] = set()
+    attempted_pairs: set[tuple[str, int]] = set()
+    for attempt in state.get("search_attempts", []):
+        if not isinstance(attempt, Mapping):
+            continue
+        year = attempt.get("year")
+        if not isinstance(year, int) or isinstance(year, bool):
+            continue
+        attempted_years.add(year)
+        metric = attempt.get("metric")
+        if isinstance(metric, str) and metric:
+            attempted_pairs.add((normalize_metric(metric) or metric, year))
+    for cell in missing_cells():
+        if getattr(cell, "status", None) == "year_absent":
+            continue
+        year = getattr(cell, "year", None)
+        metric = getattr(cell, "metric", "")
+        if metric:
+            if isinstance(year, int) and (metric, year) not in attempted_pairs:
+                return True
+            continue
+        if isinstance(year, int) and year not in attempted_years:
+            return True
+    is_year_absent = getattr(coverage, "is_year_absent", None)
+    for year in getattr(coverage, "uncovered_years", []):
+        if year in attempted_years:
+            continue
+        if callable(is_year_absent) and is_year_absent(year):
+            continue
         return True
-    if isinstance(chunk, Mapping):
-        text = f"{chunk.get('text', '')} {chunk.get('html', '')}"
-    else:
-        text = f"{getattr(chunk, 'text', '')} {getattr(chunk, 'html', '')}"
-    normalized = str(text).casefold()
-    return any(term in normalized for term in terms)
+    return False
+
+
+def _after_assess_decision(
+    state: AgentState,
+    *,
+    max_search_calls: int = MAX_SEARCH_CALLS,
+    max_tool_calls: int = MAX_TOOL_CALLS,
+) -> str:
+    """Маршрутизация после coverage: генерация или ещё один адресный поиск."""
+    plan = state.get("query_plan") or QueryPlan()
+    if plan.intent == "structural":
+        # Структурный сценарий использует отдельные инструменты и не
+        # описывается metric×year-матрицей; сохраняем прежний цикл.
+        return "choose_action"
+    budget = (
+        state.get("search_calls_used", 0) < max_search_calls
+        and state.get("tool_calls_used", 0) < max_tool_calls
+    )
+    # Аспект запроса может быть не покрыт даже при полном year-coverage:
+    # длинный вопрос размывает поиск, поэтому нужен один адресный добивочный
+    # поиск по формулировке аспекта.
+    if budget and aspect_search_candidates(state, plan):
+        return "choose_action"
+    coverage = state.get("coverage")
+    status = getattr(coverage, "status", None)
+    if status is None:
+        return "choose_action"
+    if status in {"complete", "not_required", "insufficient"}:
+        return "generate_answer"
+    if status == "partial":
+        if budget and _coverage_has_actionable_gaps(state, coverage):
+            return "choose_action"
+        return "generate_answer"
+    return "generate_answer"
 
 
 def _safe_action(value: Any) -> AgentAction | None:
@@ -417,8 +665,16 @@ def build_agent_graph(
     answer_validator: Callable[[Answer, set[str]], bool] | None = None,
     structure_analyzer: StructureAnalyzer | None = None,
     query_rewriter: Any = None,
+    max_tool_calls: int = MAX_TOOL_CALLS,
+    max_search_calls: int = MAX_SEARCH_CALLS,
 ):
-    """Строит StateGraph с лимитами на вызовы инструментов и поиска."""
+    """Строит StateGraph с лимитами на вызовы инструментов и поиска.
+
+    ``max_tool_calls``/``max_search_calls`` приходят из ``RAGSettings``;
+    модульные константы остаются безопасным fallback для прямых вызовов.
+    """
+    if max_tool_calls < 1 or max_search_calls < 1:
+        raise ValueError("agent budgets must be positive")
     router = router or _DefaultRouter()
     action_selector = action_selector or PlanAwareSelector()
     structure_analyzer = structure_analyzer or StructureAnalyzer()
@@ -429,7 +685,14 @@ def build_agent_graph(
         queries: list[str] | None = None
         filters: dict[str, Any] | None = None
         retrieval_mode: str = "hybrid"
+        #: Граф — опциональная надстройка над гибридным поиском (P7).
+        use_graph: bool = False
         top_k: int = 5
+        #: Внутренняя подсказка селектора: включить реранкер на каждый год
+        #: в temporal fan-out (PerYearSearch).
+        rerank_per_year: bool | None = None
+        #: Внутренняя подсказка селектора для адресного поиска (metric, year).
+        metric: str | None = None
 
     class StructureInput(BaseModel):
         model_config = ConfigDict(extra="forbid")
@@ -502,15 +765,19 @@ def build_agent_graph(
     def search_reports(
         query: str, queries: list[str] | None = None,
         filters: dict[str, Any] | None = None,
-        retrieval_mode: str = "hybrid", top_k: int = 5,
+        retrieval_mode: str = "hybrid", use_graph: bool = False,
+        top_k: int = 5, metric: str | None = None,
+        rerank_per_year: bool | None = None,
     ) -> str:
         """Ищет по корпусу отчётов с проверенными фильтрами."""
+        del metric  # внутренняя подсказка селектора, backend её не получает
         return wrapped(
             "search_reports",
             {
                 "query": query, "queries": queries,
                 "filters": filters_from_dict(filters),
-                "retrieval_mode": retrieval_mode, "top_k": top_k,
+                "retrieval_mode": retrieval_mode, "use_graph": use_graph,
+                "top_k": top_k, "rerank_per_year": rerank_per_year,
             },
         )
 
@@ -557,7 +824,24 @@ def build_agent_graph(
         normalized = filters.normalized()
         if not question:
             raise ValueError("query must not be empty")
-        return {"question": question, "filters": normalized, "effective_filters": normalized}
+        # Перенесённые цитаты прошлого хода уже покрывают свой год; без этого
+        # сравнительный вопрос заново искал бы год, который есть в evidence,
+        # и тратил бы бюджет на повторный широкий поиск.
+        covered = sorted(
+            {
+                year
+                for chunk in (state.get("evidence") or {}).values()
+                if isinstance(
+                    year := _chunk_year(chunk), int
+                )
+            }
+        )
+        return {
+            "question": question,
+            "filters": normalized,
+            "effective_filters": normalized,
+            "covered_years": covered,
+        }
 
     def analyze_query(state: AgentState) -> dict[str, Any]:
         try:
@@ -567,6 +851,22 @@ def build_agent_graph(
                 kwargs["history"] = list(state.get("history", []))
             result = target(state["question"], state["filters"], **kwargs)
             plan = _as_plan(result)
+            if (
+                plan.intent == "structural"
+                and not _STRUCTURAL_QUESTION.search(state["question"])
+            ):
+                # Structural intent включает дорогой обход деревьев разделов.
+                # Если вопрос не про структуру/раздел, это ложная
+                # классификация роутера: обычный поиск по содержанию дешевле
+                # и не подменяет период/раздел.
+                plan = replace(
+                    plan,
+                    intent=(
+                        "multi_hop"
+                        if plan.requires_comparison or plan.answer_mode == "comparison"
+                        else "temporal"
+                    ),
+                )
         except Exception:
             # Никогда не раскрываем текст исключений и тела ответов провайдера.
             plan = QueryPlan()
@@ -588,6 +888,20 @@ def build_agent_graph(
         effective = _filters_with_plan(state["filters"], plan)
         # Явные фильтры пользователя уже учтены в effective и важнее плана.
         expected_years = _requested_years(effective) or set(plan.years)
+        if plan.requires_comparison or plan.answer_mode == "comparison":
+            # Follow-up сравнение («а каким он был в 2022?») должно помнить
+            # год предыдущего ответа, иначе «насколько вырос» не с чем
+            # сравнить. Годы берутся из уже подтверждённого evidence.
+            carried_years = {
+                year
+                for chunk in (state.get("evidence") or {}).values()
+                if (year := _chunk_year(chunk)) is not None
+            }
+            if carried_years:
+                merged_years = sorted(set(plan.years) | carried_years)[:5]
+                plan = replace(plan, years=merged_years)
+                effective = _filters_with_plan(state["filters"], plan)
+                expected_years = _requested_years(effective) or set(plan.years)
         rewritten_queries: list[str] = []
         analysis_warnings: list[str] = []
         if plan.needs_rewriting and query_rewriter is not None:
@@ -622,6 +936,14 @@ def build_agent_graph(
             "rewritten_queries": rewritten_queries,
             "warnings": list(state.get("warnings", [])) + analysis_warnings,
         }
+
+    def clarify_period(state: AgentState) -> dict[str, Any]:
+        """Фиксирует необходимость уточнения периода до любого поиска."""
+        text = _clarification_prompt(state)
+        if text is None:
+            return {}
+        emit("clarification_required", {"reason": "missing_period"})
+        return {"clarification": text, "status": "clarification_required"}
 
     def choose_action(state: AgentState) -> dict[str, Any]:
         try:
@@ -670,8 +992,8 @@ def build_agent_graph(
             }
         calls = state.get("tool_calls_used", 0)
         searches = state.get("search_calls_used", 0)
-        if calls >= MAX_TOOL_CALLS or (
-            action.tool_name == "search_reports" and searches >= MAX_SEARCH_CALLS
+        if calls >= max_tool_calls or (
+            action.tool_name == "search_reports" and searches >= max_search_calls
         ):
             return {
                 "action": None,
@@ -741,10 +1063,13 @@ def build_agent_graph(
     ) -> dict[str, Any]:
         call_id = str(uuid.uuid4())
         args = dict(action.arguments)
-        if isinstance(args.get("filters"), SearchFilters):
-            args["filters"] = {
+        tool_args = dict(args)
+        # ``metric`` — внутренняя подсказка селектора, инструменту она не нужна.
+        tool_args.pop("metric", None)
+        if isinstance(tool_args.get("filters"), SearchFilters):
+            tool_args["filters"] = {
                 key: sorted(value) if isinstance(value, set) else value
-                for key, value in vars(args["filters"]).items()
+                for key, value in vars(tool_args["filters"]).items()
             }
         call = {
             "action": AgentAction(action.tool_name, args, action.reason_code),
@@ -753,7 +1078,7 @@ def build_agent_graph(
                     content="",
                     tool_calls=[{
                         "name": action.tool_name,
-                        "args": args,
+                        "args": tool_args,
                         "id": call_id,
                         "type": "tool_call",
                     }],
@@ -799,9 +1124,9 @@ def build_agent_graph(
         status = payload.get("_agent_status", "failed")
         warning = payload.get("warning")
         short_args = {
-            key: ("[redacted]" if key in {
-                "query", "queries", "entity_names", "chunk_id"
-            } else value)
+            # query/queries/entity_names — пользовательский текст, а не секрет
+            # (spec_benchmark §4.5); секреты и ключи сюда не попадают.
+            key: ("[redacted]" if key == "chunk_id" else value)
             for key, value in arguments.items()
             if key not in {"filters"}
         }
@@ -816,6 +1141,17 @@ def build_agent_graph(
         duration = float(payload.get("_duration_ms", 0.0))
         if action.tool_name == "search_reports":
             count = len(result_hits(result))
+        elif action.tool_name == "get_entities" and isinstance(result, Mapping):
+            graph_results = result.get("results")
+            if isinstance(graph_results, (list, tuple)):
+                count = len(graph_results)
+            else:
+                evidence_ids = result.get("evidence_chunk_ids")
+                count = (
+                    len(evidence_ids)
+                    if isinstance(evidence_ids, (list, tuple, set, frozenset))
+                    else 0
+                )
         elif action.tool_name == "get_structure_tree" and isinstance(
             result, Mapping
         ):
@@ -836,6 +1172,8 @@ def build_agent_graph(
                 trace = getattr(result, "trace", None)
                 if is_dataclass(trace):
                     diagnostics = asdict(trace)
+        elif action.tool_name == "get_entities" and result is not None:
+            diagnostics = _graph_entity_diagnostics(result)
         event = ToolEvent(
             tool_name=action.tool_name,
             arguments=short_args,
@@ -857,13 +1195,25 @@ def build_agent_graph(
         if action.tool_name == "search_reports" and result is not None:
             results.append(result)
             warnings.extend(safe_result_warnings(result))
+            # Graph-only чанки возвращаются вместе с обычными хитами, но
+            # подтверждены только графом: они ждут get_chunk и не участвуют
+            # в citations, пока не станут primary.
+            graph_only_ids = _graph_added_chunk_ids(result)
             for hit in result_hits(result):
                 chunk_id, chunk = chunk_from_hit(hit)
                 inner_id = _contained_chunk_id(chunk)
-                if chunk_id and (inner_id is None or inner_id == chunk_id):
-                    manifest.add(chunk_id)
-                    search_manifest.add(chunk_id)
-                    evidence[chunk_id] = chunk
+                if not chunk_id or (inner_id is not None and inner_id != chunk_id):
+                    continue
+                if chunk_id in graph_only_ids:
+                    if (
+                        chunk_id not in manifest
+                        and chunk_id not in search_manifest
+                    ):
+                        graph_manifest.add(chunk_id)
+                    continue
+                manifest.add(chunk_id)
+                search_manifest.add(chunk_id)
+                evidence[chunk_id] = chunk
         elif action.tool_name == "get_entities" and result is not None:
             graph_manifest.update(_graph_evidence_ids(result))
         elif action.tool_name == "get_structure_tree" and result is not None:
@@ -909,7 +1259,11 @@ def build_agent_graph(
             if isinstance(filters, SearchFilters):
                 filters = _filters_dict(filters)
             requested_now = _requested_years(filters)
-            if (
+            metric = arguments.get("metric")
+            metric = metric if isinstance(metric, str) and metric else None
+            if metric:
+                kind = "metric_year"
+            elif (
                 plan.intent == "structural"
                 and action.reason_code == "inspect_evidence"
             ):
@@ -920,24 +1274,29 @@ def build_agent_graph(
                 kind = "year"
             else:
                 kind = "broad"
-            search_attempts.append(
-                {
-                    "kind": kind,
-                    "year": (
-                        next(iter(requested_now))
-                        if len(requested_now) == 1
-                        else None
-                    ),
-                    "years": sorted(requested_now),
-                    "section_path": (
+            attempt = {
+                "kind": kind,
+                "year": (
+                    next(iter(requested_now))
+                    if len(requested_now) == 1
+                    else None
+                ),
+                "years": sorted(requested_now),
+                "section_path": (
+                    None
+                    if metric
+                    else (
                         filters.get("section_path_prefix")
                         if isinstance(filters, Mapping)
                         else None
-                    ),
-                    "result_count": count,
-                    "covered_years": covered_years,
-                }
-            )
+                    )
+                ),
+                "result_count": count,
+                "covered_years": covered_years,
+            }
+            if metric:
+                attempt["metric"] = metric
+            search_attempts.append(attempt)
         elif action.tool_name == "get_structure_tree":
             search_attempts.append(
                 {
@@ -952,7 +1311,7 @@ def build_agent_graph(
                 {"kind": "graph", "result_count": count}
             )
 
-        if calls + 1 >= MAX_TOOL_CALLS:
+        if calls + 1 >= max_tool_calls:
             warnings.append("tool_budget_exhausted")
         emit(
             "tool_completed",
@@ -994,19 +1353,26 @@ def build_agent_graph(
             expected = set(range(plan.year_from, plan.year_to + 1))
         if not expected:
             expected = _requested_years(effective)
-        terms = _metric_terms(state.get("question", ""))
-        covered = {
-            year
-            for chunk in evidence.values()
-            if _chunk_mentions_metric(chunk, terms)
-            and (year := _chunk_year(chunk)) is not None
-        }
-        missing = sorted(expected - covered)
+        required_metrics = list(plan.required_metrics) or extract_metrics(
+            state.get("question", "")
+        )
+        available_years = set(state.get("available_documents", {}).keys())
+        coverage = build_coverage(
+            sorted(expected),
+            required_metrics,
+            evidence,
+            available_years,
+        )
+        covered = set(coverage.covered_years)
+        uncovered = sorted(expected - covered)
         warnings = list(state.get("warnings", []))
         updates: dict[str, Any] = {
             "expected_years": sorted(expected),
             "covered_years": sorted(covered),
-            "missing_years": missing,
+            # ``missing_years`` — только годы, которых нет в корпусе.
+            # Незакрытая metric-ячейка не делает год отсутствующим.
+            "missing_years": list(coverage.missing_years),
+            "coverage": coverage,
         }
 
         if plan.intent == "structural" and not state.get(
@@ -1078,7 +1444,7 @@ def build_agent_graph(
                 structural.extend(new_content)
                 updates["structural_changes"] = structural
 
-        if plan.answer_mode == "comparison" and missing:
+        if plan.answer_mode == "comparison" and uncovered:
             updates["status"] = "evidence_incomplete"
         elif evidence:
             updates["status"] = "evidence_available"
@@ -1106,7 +1472,17 @@ def build_agent_graph(
     def generate_answer(state: AgentState) -> dict[str, Any]:
         emit("answer_started", {})
         started = time.perf_counter()
-        if answer_generator is None:
+        clarification = state.get("clarification")
+        if clarification:
+            # Политика clarify: без периода сравнение было бы подменой
+            # (весь корпус вместо запрошенного пользователем). Поиск не нужен.
+            answer = Answer(
+                "abstain",
+                clarification,
+                warnings=["clarification_required"],
+            )
+            answer_warnings: list[str] = []
+        elif answer_generator is None:
             answer = Answer(
                 "abstain",
                 "Ответ не сформирован: генератор ответа не настроен.",
@@ -1256,6 +1632,7 @@ def build_agent_graph(
     graph = StateGraph(AgentState)
     graph.add_node("normalize_request", normalize_request)
     graph.add_node("analyze_query", analyze_query)
+    graph.add_node("clarify_period", clarify_period)
     graph.add_node("choose_action", choose_action)
     graph.add_node("tools", tool_node)
     graph.add_node("harvest_tool_result", harvest_tool_result)
@@ -1264,17 +1641,35 @@ def build_agent_graph(
     graph.add_node("validate_answer", validate_answer)
     graph.add_edge(START, "normalize_request")
     graph.add_edge("normalize_request", "analyze_query")
-    graph.add_edge("analyze_query", "choose_action")
+    graph.add_edge("analyze_query", "clarify_period")
+
+    def after_clarify(state: AgentState) -> str:
+        return "generate_answer" if state.get("clarification") else "choose_action"
+
+    graph.add_conditional_edges(
+        "clarify_period",
+        after_clarify,
+        {"generate_answer": "generate_answer", "choose_action": "choose_action"},
+    )
 
     def after_tools(state: AgentState) -> str:
         return "harvest_tool_result"
 
     def after_assess(state: AgentState) -> str:
-        # Даже при исчерпанном бюджете сначала пытаемся сформировать ответ по
-        # уже собранным evidence; choose_action сам вернёт None и уведёт граф
-        # в generate_answer.
-        del state
-        return "choose_action"
+        # Coverage управляет переходом только для plan-aware селектора.
+        # Пользовательский selector может намеренно выстраивать цепочку
+        # инструментов; его ограничивают бюджеты choose_action.
+        if not isinstance(action_selector, PlanAwareSelector):
+            return "choose_action"
+        # Полный/неприменимый отчёт сразу уходит в генерацию, partial — в
+        # селектор только при наличии actionable gap и бюджета. Если
+        # choose_action вернёт None, tools_condition уведёт граф в
+        # generate_answer.
+        return _after_assess_decision(
+            state,
+            max_search_calls=max_search_calls,
+            max_tool_calls=max_tool_calls,
+        )
 
     graph.add_conditional_edges(
         "choose_action",

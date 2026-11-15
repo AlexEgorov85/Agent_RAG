@@ -109,6 +109,41 @@ def test_fan_out_uses_one_search_per_available_year() -> None:
     assert all(call["use_reranker"] is False for call in retriever.calls)
 
 
+def test_rerank_per_year_is_off_by_default() -> None:
+    retriever = FakeRetriever({2022, 2023})
+    engine = PerYearSearch(retriever, per_year_k=1)
+
+    engine.retrieve("риски", filters=SearchFilters(years={2022, 2023}))
+
+    assert all(call["use_reranker"] is False for call in retriever.calls)
+
+
+def test_rerank_per_year_constructor_flag_enables_reranker() -> None:
+    retriever = FakeRetriever({2022, 2023})
+    engine = PerYearSearch(retriever, per_year_k=1, rerank_per_year=True)
+
+    engine.retrieve("риски", filters=SearchFilters(years={2022, 2023}))
+
+    assert len(retriever.calls) == 2
+    assert all(call["use_reranker"] is True for call in retriever.calls)
+
+
+def test_rerank_per_year_call_override_does_not_change_other_searches() -> None:
+    retriever = FakeRetriever({2022, 2023})
+    engine = PerYearSearch(retriever, per_year_k=1)
+
+    engine.retrieve(
+        "риски",
+        filters=SearchFilters(years={2022, 2023}),
+        rerank_per_year=True,
+    )
+    assert all(call["use_reranker"] is True for call in retriever.calls)
+
+    retriever.calls.clear()
+    engine.retrieve("риски", filters=SearchFilters(years={2023}))
+    assert retriever.calls[0]["use_reranker"] is True
+
+
 def test_single_year_keeps_normal_retrieval() -> None:
     retriever = FakeRetriever({2023})
     engine = PerYearSearch(retriever, per_year_k=2)
@@ -228,3 +263,83 @@ def test_missing_year_outside_available_is_reported() -> None:
     assert result.missing_years == [2018, 2021]
     assert len(retriever.calls) == 1
     assert len(result.hits) == 3
+
+
+def _noncomparable_engine() -> tuple[FakeRetriever, PerYearSearch]:
+    retriever = FakeRetriever({2015, 2022, 2023}, hits_per_year=1)
+    engine = PerYearSearch(
+        retriever,
+        per_year_k=1,
+        documents_by_year={
+            2015: ["sber_2015"],
+            2022: ["sber_2022"],
+            2023: ["sber_2023"],
+        },
+        noncomparable_doc_ids={"sber_2015"},
+    )
+    return retriever, engine
+
+
+def test_incomparable_year_is_excluded_from_multi_year_comparison() -> None:
+    retriever, engine = _noncomparable_engine()
+
+    result = engine.retrieve(
+        "сравни динамику чистой прибыли", filters=SearchFilters(years={2015, 2022, 2023})
+    )
+
+    called_years = [
+        next(iter(call["filters"].requested_years()))
+        for call in retriever.calls
+    ]
+    assert called_years == [2022, 2023]
+    assert 2015 not in result.missing_years
+    assert any(
+        warning.startswith("incomparable_year_excluded") and "2015" in warning
+        for warning in result.warnings
+    )
+    assert result.effective_filters.years == {2022, 2023}
+
+
+def test_explicit_noncomparable_year_keeps_its_hits() -> None:
+    retriever, engine = _noncomparable_engine()
+
+    result = engine.retrieve(
+        "сравни 2015 и 2023", filters=SearchFilters(years={2015, 2023})
+    )
+
+    called_years = [
+        next(iter(call["filters"].requested_years()))
+        for call in retriever.calls
+    ]
+    assert called_years == [2015, 2023]
+    assert not any(
+        warning.startswith("incomparable_year_excluded")
+        for warning in result.warnings
+    )
+
+
+def test_single_noncomparable_year_is_not_excluded() -> None:
+    retriever, engine = _noncomparable_engine()
+
+    result = engine.retrieve("прибыль за 2015", filters=SearchFilters(years={2015}))
+
+    assert len(retriever.calls) == 1
+    assert _ids(result) == ["text-2015-0"]
+    assert not result.warnings
+
+
+def test_explicit_doc_ids_allow_noncomparable_year() -> None:
+    retriever, engine = _noncomparable_engine()
+
+    engine.retrieve(
+        "сравни динамику",
+        filters=SearchFilters(
+            years={2015, 2023}, allowed_doc_ids={"sber_2015", "sber_2023"}
+        ),
+    )
+
+    called_years = [
+        next(iter(call["filters"].requested_years()))
+        for call in retriever.calls
+    ]
+    assert called_years == [2015, 2023]

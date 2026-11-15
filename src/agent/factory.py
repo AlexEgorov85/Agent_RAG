@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import warnings
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -21,20 +22,37 @@ from src.agent.selector import PlanAwareSelector
 from src.agent.service import AgentService
 from src.agent.simple_router import SimpleRouter
 from src.agent.tools import AgentTools
-from src.core.cache import cached_document_vectors
-from src.core.corpus import load_chunks
+from src.core.cache import cached_document_vectors, corpus_fingerprint
+from src.core.corpus import enrich_chunks_with_registry, load_chunks
 from src.core.credentials import get_credentials
+from src.core.source_registry import DEFAULT_REGISTRY_PATH, load_registry
 from src.core.dense_index import DenseIndex
 from src.core.embeddings import CourseEmbeddings
+from src.core.faiss_index import FaissDenseIndex, FaissIndexError
 from src.core.rag_config import RAGSettings, load_rag_settings
 from src.engine.generator import AnswerGenerator
 from src.engine.structure_compare import StructureAnalyzer
 from src.retrieval.bm25 import BM25Index
 from src.retrieval.hybrid_retriever import HybridRetriever
 from src.retrieval.rewrite import QueryRewriter
+from src.retrieval.temporal_search import PerYearSearch
 
 #: Префикс запроса, совместимый с уже собранным кэшем курсового dev-корпуса.
 DEFAULT_QUERY_PREFIX = "query:"
+
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    """Runtime-override флага из env; пустое значение оставляет default.
+
+    ``RAGSettings`` уже читает те же переменные, но env остаётся явным
+    runtime-переключателем (например, ``RERANK_ENABLED=0`` в оболочке).
+    """
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().casefold() in _TRUTHY
 
 
 def _structure_backend(structure_dir: Path):
@@ -96,23 +114,96 @@ def _chunk_backend(chunks_by_id: Mapping[str, Mapping[str, Any]]):
     return get_chunk
 
 
-def _graph_backend(graph_dir: Path):
-    """Инструмент graph-retrieval, если артефакт графа уже построен."""
-    candidates = sorted(
+def _load_graph_artifact(graph_dir: Path):
+    """Один раз загружает активный graph-артефакт (или ``None``).
+
+    Активным считается только артефакт с манифестом ``status="complete"``:
+    частичный индекс (``failed_chunk_ids``) не должен попадать в поиск
+    (``spec_graph.md`` §4). Среди полных выбирается наиболее полный по
+    ``chunk_count``, при равенстве — самый свежий. Артефакт без манифеста
+    (``graph.json`` из тестов и локальных сборок) допустим как fallback, но
+    только если полных манифестированных артефактов нет.
+    """
+    from src.graph.graph_builder import load_graph
+
+    for path in _graph_artifact_candidates(graph_dir):
+        try:
+            return load_graph(path)
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def _graph_artifact_candidates(graph_dir: Path) -> list[Path]:
+    """Упорядочить артефакты графа: сначала полные, затем без манифеста."""
+    if not graph_dir.is_dir():
+        return []
+    artifacts = [
         path
         for path in graph_dir.glob("*.json")
         if path.is_file() and not path.name.endswith("_manifest.json")
+    ]
+    by_name = {path.name: path for path in artifacts}
+
+    complete: list[tuple[int, str, float, Path]] = []
+    manifest_backed: set[str] = set()
+    for manifest_path in graph_dir.glob("*_manifest.json"):
+        if not manifest_path.is_file():
+            continue
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(manifest, dict):
+            continue
+        fingerprint = manifest.get("graph_fingerprint")
+        if isinstance(fingerprint, str) and fingerprint:
+            manifest_backed.add(f"{fingerprint}.json")
+        if manifest.get("status") != "complete":
+            continue
+        created_at = manifest.get("created_at")
+        if not isinstance(created_at, str) or not created_at:
+            created_at = ""
+        chunk_count = manifest.get("chunk_count")
+        if isinstance(chunk_count, bool) or not isinstance(chunk_count, int):
+            chunk_count = 0
+        names = [
+            f"{fingerprint}.json" if isinstance(fingerprint, str) else "",
+            manifest_path.name[: -len("_manifest.json")] + ".json",
+        ]
+        for name in names:
+            artifact = by_name.get(name)
+            if artifact is not None:
+                try:
+                    mtime = artifact.stat().st_mtime
+                except OSError:
+                    mtime = 0.0
+                complete.append((chunk_count, created_at, mtime, artifact))
+                break
+
+    # Больший полный граф покрывает больше документов; при равенстве — свежий.
+    complete.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+    ordered = [path for _, _, _, path in complete]
+    seen = {path.name for path in ordered}
+    # Артефакты с неполным манифестом не рассматриваются вовсе; без
+    # манифеста — legacy-путь (граф, собранный скриптом или тестом).
+    fallback = sorted(
+        (
+            path
+            for path in artifacts
+            if path.name not in seen and path.name not in manifest_backed
+        ),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
     )
-    if not candidates:
-        return None
+    return ordered + fallback
 
-    from src.graph.graph_builder import load_graph
+
+def _entity_backend(loaded):
+    """Инструмент graph-retrieval поверх уже загруженного артефакта графа."""
+    if loaded is None:
+        return None
     from src.retrieval.graph_retriever import resolve_entity_ids, retrieve_graph
-
-    try:
-        loaded = load_graph(candidates[-1])
-    except (OSError, ValueError):
-        return None
 
     def get_entities(
         entity_names, *, filters, max_hops: int
@@ -150,12 +241,109 @@ def _graph_backend(graph_dir: Path):
     return get_entities
 
 
+def _load_source_registry(path: Path):
+    """Прочитать реестр источников; отсутствие файла не блокирует запуск."""
+    try:
+        return load_registry(path)
+    except (OSError, ValueError):
+        # Реестр — метаданные, а не корпус: битый/отсутствующий файл не должен
+        # мешать чату работать, просто issuer останется неизвестным.
+        return []
+
+
+def _index_target(
+    embeddings: CourseEmbeddings,
+    chunks: list[dict[str, Any]],
+    *,
+    settings: RAGSettings,
+    indexes_dir: Path | str | None,
+    cache_dir: Path | str | None,
+) -> tuple[Path, str]:
+    """Вернуть каталог индекса и fingerprint корпуса/модели."""
+    if indexes_dir is None:
+        indexes_dir = (
+            Path(cache_dir).parent / "indexes"
+            if cache_dir is not None
+            else settings.indexes_dir
+        )
+    fingerprint = corpus_fingerprint(
+        chunks,
+        embeddings.model,
+        embedding_config={"query_prefix": embeddings.query_prefix},
+    )
+    return Path(indexes_dir) / fingerprint, fingerprint
+
+
+def _load_dense_index(
+    chunks: list[dict[str, Any]],
+    embeddings: CourseEmbeddings,
+    *,
+    settings: RAGSettings,
+    indexes_dir: Path | str | None,
+    cache_dir: Path | str | None,
+) -> tuple[Any | None, Path, str]:
+    """Попробовать загрузить FAISS-индекс без вычисления эмбеддингов."""
+    if not settings.faiss_enabled:
+        return None, Path(), ""
+    target, fingerprint = _index_target(
+        embeddings,
+        chunks,
+        settings=settings,
+        indexes_dir=indexes_dir,
+        cache_dir=cache_dir,
+    )
+    try:
+        loaded = FaissDenseIndex.load(
+            target,
+            chunks,
+            fingerprint=fingerprint,
+            model=embeddings.model,
+        )
+    except (FaissIndexError, ImportError, ValueError, OSError) as exc:
+        warnings.warn(
+            f"faiss_load_failed: {exc}", RuntimeWarning, stacklevel=2
+        )
+        loaded = None
+    return loaded, target, fingerprint
+
+
+def _build_dense_index(
+    chunks: list[dict[str, Any]],
+    vectors: Mapping[str, list[float]],
+    embeddings: CourseEmbeddings,
+    *,
+    settings: RAGSettings,
+    target: Path,
+    fingerprint: str,
+) -> Any:
+    """Собрать FAISS-индекс по готовым векторам с безопасным fallback."""
+    if not settings.faiss_enabled:
+        return DenseIndex(chunks, vectors)
+    try:
+        return FaissDenseIndex.load_or_build(
+            target,
+            chunks,
+            vectors,
+            fingerprint=fingerprint,
+            model=embeddings.model,
+            query_prefix=embeddings.query_prefix,
+            persist=settings.faiss_persist,
+        )
+    except (FaissIndexError, ImportError, ValueError, OSError) as exc:
+        warnings.warn(
+            f"faiss_fallback_to_dense: {exc}", RuntimeWarning, stacklevel=2
+        )
+        return DenseIndex(chunks, vectors)
+
+
 def create_agent_service(
     *,
     chunks_dir: Path | str | None = None,
     structure_dir: Path | str | None = None,
     graph_dir: Path | str | None = None,
     cache_dir: Path | str | None = None,
+    indexes_dir: Path | str | None = None,
+    source_registry_path: Path | str | None = None,
     client: Any = None,
     use_reranker: bool | None = None,
     settings: RAGSettings | None = None,
@@ -167,6 +355,12 @@ def create_agent_service(
         structure_dir: Каталог ``*_sections.json`` (по умолчанию ``data/structure``).
         graph_dir: Каталог артефактов графа (по умолчанию ``data/graph``).
         cache_dir: Каталог кэша векторов; по умолчанию ``RAGSettings.cache_dir``.
+        indexes_dir: Каталог постоянных индексов; по умолчанию
+            ``RAGSettings.indexes_dir``. Если задан ``cache_dir``, но не задан
+            ``indexes_dir``, индекс кладётся рядом с кэшем (``../indexes``),
+            чтобы тесты и локальные сборки не писали в общий ``data/indexes``.
+        source_registry_path: Реестр источников для ``issuer``/``country`` чанков.
+            ``None`` — env ``SOURCE_REGISTRY_PATH`` или ``data/source_registry.json``.
         client: Готовый OpenAI-совместимый клиент (для тестов/smoke).
         use_reranker: Включить LLM-реранкер. ``None`` — из env ``RERANK_ENABLED``
             (по умолчанию включён; ``0`` отключает).
@@ -188,6 +382,20 @@ def create_agent_service(
     if not chunks:
         raise RuntimeError(f"В {chunks_path} нет чанков.")
 
+    registry_path = Path(
+        source_registry_path
+        or os.getenv("SOURCE_REGISTRY_PATH")
+        or DEFAULT_REGISTRY_PATH
+    )
+    records = _load_source_registry(registry_path)
+    source_status_by_doc: dict[str, str] = {}
+    if records:
+        # Чанки из PDF не содержат issuer: без обогащения фильтр issuers
+        # отбрасывает весь корпус, а citations остаются без эмитента.
+        enrich_chunks_with_registry(chunks, records)
+        for record in records:
+            source_status_by_doc[record.doc_id] = record.source_status
+
     if client is None:
         from openai import OpenAI
 
@@ -203,22 +411,44 @@ def create_agent_service(
         settings.embeddings_model,
         os.getenv("EMBED_QUERY_PREFIX", DEFAULT_QUERY_PREFIX),
     )
-    vectors = cached_document_vectors(
-        chunks, embeddings, Path(cache_dir or settings.cache_dir)
+    dense, index_target, index_fingerprint = _load_dense_index(
+        chunks,
+        embeddings,
+        settings=settings,
+        indexes_dir=indexes_dir,
+        cache_dir=cache_dir,
     )
-    dense = DenseIndex(chunks, vectors)
+    if dense is None:
+        vectors = cached_document_vectors(
+            chunks, embeddings, Path(cache_dir or settings.cache_dir)
+        )
+        dense = _build_dense_index(
+            chunks,
+            vectors,
+            embeddings,
+            settings=settings,
+            target=index_target,
+            fingerprint=index_fingerprint,
+        )
     bm25 = BM25Index(chunks)
 
     if use_reranker is None:
         # Реранкер есть в production и включён по умолчанию; явное
         # ``RERANK_ENABLED=0`` отключает его (например, ради latency/cost).
-        use_reranker = os.getenv("RERANK_ENABLED", "1").strip() == "1"
+        use_reranker = _env_flag("RERANK_ENABLED", settings.rerank_enabled)
     reranker = None
     if use_reranker and settings.rerank_model:
         from src.retrieval.reranker import LLMReranker
 
+        # Пул graph-кандидатов шире одного запроса реранкера: LLMReranker
+        # сам режет его на батчи, но должен принять весь пул, иначе
+        # graph+rerank молча деградирует к RRF.
         reranker = LLMReranker(
-            client, settings.rerank_model, allow_missing_scores=True)
+            client,
+            settings.rerank_model,
+            allow_missing_scores=True,
+            max_candidates=settings.candidates,
+        )
 
     retriever = HybridRetriever(
         dense,
@@ -228,7 +458,9 @@ def create_agent_service(
         candidates=settings.candidates,
         rerank_pool=settings.rerank_pool,
         top_k=settings.top_k,
-        diversity=True,
+        diversity=settings.diversity_enabled,
+        max_per_doc=settings.max_per_doc,
+        max_per_section=settings.max_per_section,
     )
     available_years = {
         int(chunk["year"])
@@ -251,13 +483,59 @@ def create_agent_service(
     for ids in documents_by_year.values():
         ids.sort()
 
+    # Документы с другим эмитентом (sber_2015 — БПС-Сбербанк) не участвуют
+    # во временных сравнениях по умолчанию; прямой вопрос про год остаётся
+    # доступным (spec_target.md §3.1).
+    noncomparable_doc_ids = {
+        doc_id
+        for doc_id, status in source_status_by_doc.items()
+        if status != "comparable"
+    }
+    if not records:
+        from src.core.source_registry import NONCOMPARABLE_DOC_IDS
+
+        noncomparable_doc_ids = set(NONCOMPARABLE_DOC_IDS)
+
+    # Веерный поиск по годам собирается поверх hybrid retriever: фактологический
+    # запрос с одним годом (или без периода) уходит в retriever напрямую, а
+    # сравнение нескольких лет получает минимум per_year_k хитов на год.
+    per_year_search = PerYearSearch(
+        retriever,
+        per_year_k=settings.per_year_k,
+        max_years=settings.max_years,
+        documents_by_year=documents_by_year,
+        noncomparable_doc_ids=noncomparable_doc_ids,
+    )
+
+    chunks_by_id = {chunk["chunk_id"]: chunk for chunk in chunks}
+    # Артефакт графа загружается один раз: он нужен и инструменту
+    # get_entities, и graph-augmented поиску для use_graph=True.
+    loaded_graph = _load_graph_artifact(Path(graph_dir or "data/graph"))
+    graph_search_backend = None
+    if loaded_graph is not None:
+        from src.retrieval.graph_hybrid import GraphAugmentedRetriever
+
+        # Реранкер общий: базовые и графовые кандидаты должны попасть в один
+        # пул, иначе graph-хиты дописываются в конец и обрезаются top_k
+        # (spec_graph.md §5/§8.5).
+        graph_search_backend = GraphAugmentedRetriever(
+            retriever,
+            loaded_graph.graph,
+            chunks_by_id,
+            reranker=reranker,
+            max_candidates=settings.candidates,
+            base_candidate_k=settings.rerank_pool,
+        )
+
     tools = AgentTools(
-        search_backend=retriever,
+        search_backend=per_year_search,
+        graph_search_backend=graph_search_backend,
         structure_backend=_structure_backend(
             Path(structure_dir or "data/structure")
         ),
-        chunk_backend=_chunk_backend({chunk["chunk_id"]: chunk for chunk in chunks}),
-        entity_backend=_graph_backend(Path(graph_dir or "data/graph")),
+        chunk_backend=_chunk_backend(chunks_by_id),
+        entity_backend=_entity_backend(loaded_graph),
+        top_k=settings.top_k,
     )
     answerer = AnswerGenerator(
         client,
@@ -266,7 +544,9 @@ def create_agent_service(
         max_context_tokens=settings.context_tokens,
     )
 
-    use_llm_router = os.getenv("LLM_ROUTER_ENABLED", "1").strip() == "1"
+    use_llm_router = _env_flag(
+        "LLM_ROUTER_ENABLED", settings.llm_router_enabled
+    )
     if use_llm_router:
         router = LLMRouter(
             client,
@@ -276,14 +556,16 @@ def create_agent_service(
     else:
         router = SimpleRouter(available_years)
 
-    use_structure_llm = (
-        os.getenv("LLM_STRUCTURE_VERIFY", "1").strip() == "1"
+    use_structure_llm = _env_flag(
+        "LLM_STRUCTURE_VERIFY", settings.llm_structure_verify
     )
     structure_analyzer = StructureAnalyzer(
         client if use_structure_llm else None,
         (settings.router_model or settings.model) if use_structure_llm else None,
     )
-    use_rewriter = os.getenv("LLM_REWRITE_ENABLED", "1").strip() == "1"
+    use_rewriter = _env_flag(
+        "LLM_REWRITE_ENABLED", settings.llm_rewrite_enabled
+    )
     query_rewriter = (
         QueryRewriter(
             client,
@@ -297,8 +579,17 @@ def create_agent_service(
         tools,
         answerer=answerer,
         router=router,
-        action_selector=PlanAwareSelector(),
+        action_selector=PlanAwareSelector(
+            max_searches=settings.max_search_calls,
+            max_structure_docs=settings.max_structure_docs,
+            max_queries=settings.max_queries,
+            coverage_enabled=settings.coverage_enabled,
+            max_coverage_searches=settings.max_coverage_searches,
+        ),
         documents_by_year=documents_by_year,
         structure_analyzer=structure_analyzer,
         query_rewriter=query_rewriter,
+        max_tool_calls=settings.max_tool_calls,
+        max_search_calls=settings.max_search_calls,
+        verification_enabled=settings.verification_enabled,
     )

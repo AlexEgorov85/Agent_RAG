@@ -197,17 +197,25 @@ overall/by-category, ошибки, пропущенные cases и model IDs.
 
 ## 6. Команды и приёмка
 
-Целевые команды:
+Фактические команды на 15.11.2026:
 
 ```powershell
-.venv\Scripts\python.exe -m pytest -q
-.venv\Scripts\python.exe -m scripts.build_corpus --verify
-.venv\Scripts\python.exe -m eval.run_eval --split dev --no-judge
+.venv\Scripts\python.exe -m pytest
+.venv\Scripts\python.exe scripts\build_corpus.py
+.venv\Scripts\python.exe scripts\verify_corpus.py
+.venv\Scripts\python.exe -m eval.runner --suite smoke --split dev --no-judge
 .venv\Scripts\python.exe -m streamlit run src/ui/app.py
 ```
 
-Конкретный CLI-маршрут можно изменить при реализации, но README и CI используют одну
-согласованную команду на задачу.
+Для целевого React UI используется FastAPI adapter и Vite:
+
+```powershell
+.venv\Scripts\python.exe -m uvicorn src.api.app:app --port 8000
+cd frontend; npm run dev
+```
+
+Согласованный набор команд на задачу фиксируется в `README.md`; этот раздел
+оставлен как исторический контракт eval/Streamlit.
 
 Приёмка UI/eval:
 

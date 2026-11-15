@@ -13,6 +13,7 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from src.agent.coverage import extract_metrics, normalize_metric
 from src.agent.simple_router import SimpleRouter
 from src.agent.state import QueryPlan
 from src.retrieval.hybrid_retriever import SearchFilters
@@ -32,7 +33,10 @@ _SYSTEM_PROMPT = """Ты — планировщик поиска по годов
   "entities": ["сущность"],
   "needs_rewriting": true | false,
   "needs_graph": true | false,
-  "answer_mode": "concise" | "comparison" | "outline"
+  "answer_mode": "concise" | "comparison" | "outline",
+  "aspects": ["до 4 поисковых аспектов"],
+  "required_metrics": ["net_profit", "revenue", "roe", "roa", "assets", "capital", "margin"],
+  "requires_comparison": true | false
 }
 
 Правила:
@@ -43,6 +47,9 @@ _SYSTEM_PROMPT = """Ты — планировщик поиска по годов
 - structural — вопросы о структуре, разделах, оглавлении и изменениях содержания.
 - multi_hop — вопросы, требующие связей между сущностями, фактами или разделами.
 - answer_mode=comparison для сравнений и динамики по нескольким годам.
+- required_metrics: только канонические id из списка
+  (net_profit, revenue, operating_income, roe, roa, assets, capital, margin).
+- aspects — до четырёх коротких аспектов поиска, без новых фактов.
 - Если сомневаешься, верни безопасный factoid без выдуманных годов."""
 
 
@@ -147,7 +154,7 @@ class LLMRouter:
             return base
         if not isinstance(payload, Mapping):
             return base
-        return self._merge(base, payload)
+        return self._merge(base, payload, question)
 
     def _call(
         self,
@@ -228,6 +235,7 @@ class LLMRouter:
         self,
         base: QueryPlan,
         payload: Mapping[str, Any],
+        question: str = "",
     ) -> QueryPlan:
         intent = payload.get("intent")
         if intent not in _INTENTS:
@@ -291,6 +299,34 @@ class LLMRouter:
         if intent == "structural" and len(effective_years) > 1:
             answer_mode = "comparison"
 
+        aspects: list[str] = []
+        for item in list(base.aspects) + _str_list(payload.get("aspects")):
+            if item not in aspects:
+                aspects.append(item)
+        aspects = aspects[:4]
+
+        # LLM не должен расширять набор показателей: для простого вопроса
+        # «какая чистая прибыль» он нередко возвращает весь словарь метрик.
+        # Берём метрики из вопроса/детерминированного fallback и добавляем
+        # только те метрики LLM, которые реально упомянуты в вопросе.
+        question_metrics = set(extract_metrics(question))
+        metrics: list[str] = []
+        for item in list(base.required_metrics) + _str_list(
+            payload.get("required_metrics")
+        ):
+            metric = normalize_metric(item)
+            if metric is None or metric in metrics:
+                continue
+            if metric in question_metrics or metric in base.required_metrics:
+                metrics.append(metric)
+        metrics = metrics[:5]
+
+        requires_comparison = bool(
+            base.requires_comparison
+            or payload.get("requires_comparison") is True
+            or len(effective_years) > 1
+        )
+
         return QueryPlan(
             intent=intent,
             years=sorted(set(years)),
@@ -301,4 +337,7 @@ class LLMRouter:
             needs_rewriting=needs_rewriting,
             needs_graph=needs_graph,
             answer_mode=answer_mode,
+            aspects=aspects,
+            required_metrics=metrics,
+            requires_comparison=requires_comparison,
         )

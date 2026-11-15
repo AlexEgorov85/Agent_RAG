@@ -21,6 +21,8 @@ def test_last_n_years_are_anchored_to_corpus_maximum() -> None:
     assert result.intent == "temporal"
     assert result.years == [2020, 2021, 2022, 2023, 2024]
     assert result.answer_mode == "comparison"
+    assert result.required_metrics == ["net_profit"]
+    assert result.requires_comparison is True
 
 
 def test_last_n_years_work_for_an_arbitrary_corpus() -> None:
@@ -154,6 +156,29 @@ def test_factoid_without_period_is_not_temporal() -> None:
 
     assert result.intent == "factoid"
     assert result.years == []
+    assert result.needs_graph is False
+
+
+def test_factor_question_enables_graph_search() -> None:
+    result = _plan("Какие факторы повлияли на прибыль?")
+
+    assert result.needs_graph is True
+    assert result.intent == "factoid"
+
+
+def test_relation_question_with_two_metrics_is_multi_hop() -> None:
+    result = _plan("Как связаны выручка и чистая прибыль?")
+
+    assert result.needs_graph is True
+    assert result.intent == "multi_hop"
+    assert set(result.required_metrics) == {"revenue", "net_profit"}
+
+
+def test_simple_factoid_does_not_enable_graph() -> None:
+    result = _plan("Какая чистая прибыль за 2024 год?")
+
+    assert result.needs_graph is False
+    assert result.intent == "temporal"
 
 
 def test_amount_is_not_treated_as_year() -> None:

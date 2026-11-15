@@ -2,14 +2,89 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from typing import Any
+from urllib.parse import quote
+
+DEFAULT_API_BASE_URL = "http://127.0.0.1:8000"
 
 
 def _value(item: Any, key: str, default: Any = None) -> Any:
     if isinstance(item, Mapping):
         return item.get(key, default)
     return getattr(item, key, default)
+
+
+def api_base_url(environ: Mapping[str, str] | None = None) -> str:
+    """Возвращает базовый URL API без завершающего слэша.
+
+    Значение берётся из ``API_BASE_URL`` во время вызова, а не при импорте:
+    тесты и разные окружения могут переопределять его без перезапуска.
+    """
+    source = os.environ if environ is None else environ
+    value = source.get("API_BASE_URL", "")
+    if not isinstance(value, str):
+        value = ""
+    value = value.strip().rstrip("/")
+    return value or DEFAULT_API_BASE_URL
+
+
+def _page_number(value: Any) -> int | None:
+    """Номер PDF-страницы для fragment; невалидное значение — без fragment."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdigit() and int(text) > 0:
+            return int(text)
+    return None
+
+
+def citation_pdf_link(
+    citation: Any,
+    *,
+    base_url: str | None = None,
+) -> dict[str, Any]:
+    """Строит внешнюю ссылку на PDF документа цитаты.
+
+    ``doc_id`` обязателен: без него URL не выдумывается. ``page_pdf``
+    необязателен: без него ссылка ведёт на документ без ``#page=``.
+    """
+    doc_id = _value(citation, "doc_id")
+    if not isinstance(doc_id, str) or not doc_id.strip():
+        return {
+            "available": False,
+            "url": None,
+            "label": "PDF недоступен",
+            "page": None,
+        }
+
+    normalized_base = (
+        base_url.strip().rstrip("/")
+        if isinstance(base_url, str) and base_url.strip()
+        else api_base_url()
+    )
+    page = _page_number(_value(citation, "page_pdf"))
+    url = (
+        f"{normalized_base}/api/documents/"
+        f"{quote(doc_id.strip(), safe='')}/file"
+    )
+    if page is None:
+        return {
+            "available": True,
+            "url": url,
+            "label": "Открыть PDF",
+            "page": None,
+        }
+    return {
+        "available": True,
+        "url": f"{url}#page={page}",
+        "label": f"Открыть PDF, стр. {page}",
+        "page": page,
+    }
 
 
 def citation_metadata(citation: Any) -> dict[str, Any]:
@@ -64,6 +139,12 @@ def render_citations(st: Any, citations: Any) -> None:
             ):
                 if key in metadata:
                     st.caption(f"{label}: {metadata[key]}")
+            link = citation_pdf_link(citation)
+            if link["available"]:
+                # Только внешняя ссылка; PDF-viewer внутри UI не имитируется.
+                st.markdown(f"[{link['label']}]({link['url']})")
+            else:
+                st.caption(link["label"])
             quote = citation_quote(citation)
             if quote:
                 st.text(quote)

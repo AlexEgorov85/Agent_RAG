@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
+from src.agent.coverage import extract_metrics
 from src.agent.state import QueryPlan
 
 #: Четырёхзначный год в разумном для отчётов диапазоне. Это не границы корпуса,
@@ -74,6 +75,11 @@ _STRUCTURAL = re.compile(
     r"содержани\w*\s+(?:раздел|отч[её]т)\w*"
     r")\b",
     re.I,
+)
+#: Связи и причинность — сигнал включить graph-поиск (spec_agent_enhancement P2).
+#: Простое «какая прибыль» граф не включает. Текст уже нормализован (ё → е).
+_GRAPH_RELATION = re.compile(
+    r"(?:связ|влия|фактор|почему|причин|зависит|взаимосвяз)", re.I
 )
 
 _WORD_NUMBERS = {
@@ -197,12 +203,15 @@ class SimpleRouter:
     def analyze(self, question: str, filters: object) -> QueryPlan:
         del filters
         text = _normalize(question)
+        required_metrics = extract_metrics(question)
         years = _years_from_text(text, self.min_year, self.max_year)
         has_comparison = bool(_COMPARISON.search(text))
         has_all_years = bool(_ALL_YEARS.search(text))
         has_recent = bool(_RECENT_YEARS.search(text))
         has_latest = bool(_LATEST_YEAR.search(text))
         has_structural = bool(_STRUCTURAL.search(text))
+        needs_graph = bool(_GRAPH_RELATION.search(text))
+        multi_hop = needs_graph and len(required_metrics) >= 2
 
         count_match = (
             _LAST_N.search(text)
@@ -225,7 +234,11 @@ class SimpleRouter:
             and not has_relative
             and not has_structural
         ):
-            return QueryPlan()
+            return QueryPlan(
+                required_metrics=required_metrics,
+                needs_graph=needs_graph,
+                intent="multi_hop" if multi_hop else "factoid",
+            )
 
         anchor = max(years) if years else self.max_year
 
@@ -264,6 +277,8 @@ class SimpleRouter:
         comparison = has_comparison or len(years) > 1
         if has_structural:
             intent = "structural"
+        elif multi_hop:
+            intent = "multi_hop"
         elif years or has_comparison:
             intent = "temporal"
         else:
@@ -272,7 +287,10 @@ class SimpleRouter:
             intent=intent,
             years=sorted(years),
             needs_rewriting=True,
+            needs_graph=needs_graph,
             answer_mode=(
                 "comparison" if comparison and len(years) > 1 else "concise"
             ),
+            required_metrics=required_metrics,
+            requires_comparison=comparison and len(years) > 1,
         )

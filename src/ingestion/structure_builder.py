@@ -29,6 +29,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from difflib import SequenceMatcher
 from html import unescape
@@ -394,19 +395,136 @@ def _consume_toc_cells(entries: List["TocEntry"], state: Dict[str, Any],
         _consume_toc_line(entries, state, cell)
 
 
+def _looks_like_toc_group(line: str) -> bool:
+    """Похоже ли на заголовок части оглавления (не на строку «имя ... 23»)."""
+    cleaned = _clean_toc_line(line)
+    if not cleaned or len(cleaned) > 120:
+        return False
+    if not _looks_like_toc_name(cleaned):
+        return False
+    if _DOTTED_LEADERS_RE.search(line or ""):
+        return False
+    if re.search(r"\s\d{1,3}$", cleaned):
+        return False
+    return not _TOC_JUNK.match(cleaned)
+
+
+#: Обрывки имён после межколоночной склейки: «Сбербанка и», «Прорывные ... в».
+_DANGLING_END_RE = re.compile(
+    r"(?:^|\s)(?:и|в|на|с|по|для|от|к|о|об|из|за|линии|ини|ии)$",
+    re.IGNORECASE,
+)
+#: OCR-хвосты TOC-строк: «Структура персонала нии», «Достижения oo».
+_TOC_TAIL_JUNK_RE = re.compile(
+    r"\s+(?:линии|лии|ини|ии|нии|нк|oo|оо|о)$", re.IGNORECASE)
+#: Висячий предлог/союз в конце имени: «Ключевые результаты и».
+_TOC_TAIL_CONJ_RE = re.compile(
+    r"\s+(?:и|в|на|с|по|для|от|к|о|об|из|за)$", re.IGNORECASE)
+
+
+
+def _clean_toc_name(name: str) -> str:
+    """Убрать OCR-хвосты и висячие союзы из имени строки оглавления."""
+    cleaned = _display_title(name)
+    cleaned = _TOC_TAIL_JUNK_RE.sub("", cleaned)
+    cleaned = _TOC_TAIL_CONJ_RE.sub("", cleaned)
+    return cleaned.strip(" .,:;-")
+
+
+def _is_dangling_fragment(name: str) -> bool:
+    """True для обрывка имени, который нельзя сделать разделом."""
+    stripped = (name or "").strip()
+    if not stripped:
+        return True
+    if stripped.endswith((",", ";", ":")):
+        return True
+    if re.match(r"^(?:и|в|на|с|по|для|от|к|о|об|из|за)\s",
+                stripped, re.IGNORECASE):
+        return True
+    return bool(_DANGLING_END_RE.search(stripped))
+
+
+#: Слова-обрывки TOC 2017: одиночные/парные хвосты и обрывы на предлоге.
+_TOC_FRAGMENT_TAIL_ANY = {
+    "сбербанка", "управления", "финансов", "отчетности",
+}
+_TOC_FRAGMENT_TAIL_SHORT = {"области", "повышении"}
+
+
+def _is_fragment_tail(name: str) -> bool:
+    """Короткое имя, оборванное на служебном слове («Цели в области»)."""
+    words = (name or "").strip().split()
+    if not words:
+        return False
+    last = words[-1].strip(".,:;").lower()
+    if len(words) <= 2 and last in _TOC_FRAGMENT_TAIL_ANY:
+        return True
+    return len(words) <= 4 and last in _TOC_FRAGMENT_TAIL_SHORT
+
+
+
+
 def _toc_entries_from_window(window: Sequence[RawElement]) -> List[TocEntry]:
     """Собрать записи TOC из окна элементов (от заголовка до +4 страниц)."""
     entries: List[TocEntry] = []
     state: Dict[str, Any] = {}
+    group: Optional[str] = None
+    pending_number: Optional[str] = None
+
+    def _tag_new(before: int) -> None:
+        """Проставить текущую часть новым записям окна."""
+        for entry in entries[before:]:
+            if entry.group is None and group is not None:
+                entry.group = group
+
     for element in window:
         if element.html:
+            before = len(entries)
             for cells in _table_rows(element.html):
+                before_row = len(entries)
                 _consume_toc_cells(entries, state, cells)
+                # Строка таблицы 2017 часто без номера страницы (OCR потерял
+                # лидер): сохраняем имя как кандидат, страницу восстановит
+                # сопоставление с Title тела.
+                if (len(entries) == before_row and state.get("name")
+                        and state.get("page") is None):
+                    name = state.pop("name")
+                    _add_toc_entry(entries, name, None)
+                    state.clear()
+            _tag_new(before)
             state.clear()
             continue
-        for line in (element.text or "").splitlines():
+
+        raw_text = element.text or ""
+        cleaned = _clean_toc_line(raw_text)
+
+        # «04.» отдельным блоком: номер относится к следующему заголовку части.
+        if cleaned and re.fullmatch(r"\d{1,2}\.?", cleaned):
+            pending_number = cleaned.rstrip(".")
+            continue
+
+        if element.type in {"Title", "ListItem", "UncategorizedText",
+                            "Header"} and _looks_like_toc_group(raw_text):
+            group = cleaned
+            if pending_number is not None and not re.match(
+                    r"^\d{1,2}\.", cleaned):
+                group = f"{pending_number}. {cleaned}"
+            pending_number = None
+            state.clear()
+            continue
+
+        before = len(entries)
+        for line in raw_text.splitlines():
             _consume_toc_line(entries, state, line)
+        _tag_new(before)
+
+    # Последнее имя без страницы (TOC без номеров, 2017) — тоже кандидат.
+    if state.get("name") and state.get("page") is None:
+        before = len(entries)
+        _add_toc_entry(entries, state["name"], None)
+        _tag_new(before)
     return entries
+
 
 
 def _is_toc_header(text: str) -> bool:
@@ -426,11 +544,14 @@ class TocEntry:
         name: Название части (нормализуется по краям, без хвостовых точек).
         page: Начальная страница от TOC (первое число строки); None у заголовка.
         level: Уровень, вычисленный по нумерации имени («1.», «1.1.») или None.
+        group: Имя части-родителя, если запись взята из таблицы под заголовком
+            части TOC («Портрет Группы», «01. Портрет Группы»); None иначе.
     """
 
     name: str
     page: Optional[int] = None
     level: Optional[int] = None
+    group: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Сериализация (для артефактов и тестов)."""
@@ -453,6 +574,7 @@ def parse_toc_entries(elements: Sequence[RawElement]) -> List[TocEntry]:
         пуста, если страницы-оглавления не найдены/не распознались.
     """
     entries: List[TocEntry] = []
+    toc_pages = _toc_page_numbers(elements)
     for index, element in enumerate(elements):
         if not _is_toc_header(element.text):
             continue
@@ -461,12 +583,19 @@ def parse_toc_entries(elements: Sequence[RawElement]) -> List[TocEntry]:
         for following in elements[index + 1:]:
             if _is_toc_header(following.text):
                 break
-            if following.page > header_page + 1:
+            # Окно — только реальные страницы оглавления (2017: одна стр. 3),
+            # иначе тело попадает в TOC и даёт «разделы» из инфографики.
+            if following.page not in toc_pages:
                 break
             window.append(following)
-        # Страницы самого оглавления (и его колонтитулы) не являются разделами.
-        entries.extend(entry for entry in _toc_entries_from_window(window)
-                       if entry.page is not None and entry.page > header_page)
+        # Страницы самого оглавления не являются разделами. Номера страниц в
+        # TOC — печатные, поэтому они могут быть МЕНЬШЕ PDF-страницы заголовка
+        # (2016: «Сбербанк сегодня 4» при «Оглавлении» на 5-й странице). Такие
+        # записи валидны; отбрасываем только совпадение с самой страницей TOC.
+        entries.extend(
+            entry for entry in _toc_entries_from_window(window)
+            if entry.page is None
+            or (entry.page >= 2 and entry.page != header_page))
 
     # Дедуп по нормализованному имени: TOC часто дублируется (Header + Title,
     # две колонки, повторный OCR одной страницы).
@@ -556,9 +685,11 @@ def is_junk_title(text: str) -> bool:
     if text.count("%") and len(text) < 12:      # ">5,7%", ">22%"
         return True
     # Милстоуны: ведущая цифра БЕЗ нумерационного хвоста («93 АС», «116,5 ПБ»,
-    # «3 PLATFORM V»); «1. Управление рисками» — не попадает (нумерация!)
+    # «3 PLATFORM V»); «1. Управление рисками» — не попадает (нумерация!).
+    # Исключение — части 2018 без точки: «1 Портрет Группы» (Title Case).
+    numbered_part = bool(re.match(r"^\d{1,2}\s+[A-ZА-ЯЁ][a-zа-яё]+", text))
     if len(text) < 25 and re.match(r"^\d[\d.,+~ ]", text) \
-            and not _NUMBERED.match(text):
+            and not _NUMBERED.match(text) and not numbered_part:
         return True
     # Одно-буквенное слово + число («В 15 раз»)
     if re.match(r"^[А-ЯЁA-Za-z]\s+\d", text):
@@ -834,12 +965,46 @@ def _cluster_1d(values: Sequence[float], k: int) -> Dict[float, int]:
 
 
 def _toc_page_numbers(elements: Sequence[RawElement]) -> set[int]:
-    """Страницы оглавления (и следующие 4) — их Title не являются разделами."""
+    """Страницы оглавления — только те, где реально есть TOC-строки.
+
+    Раньше брались ``header .. header+4``, из-за чего тело (2016: стр. 7–9)
+    ошибочно исключалось из дерева. Теперь окно растёт, пока на странице есть
+    точечные лидеры/хвостовые номера, и обрывается на первой странице тела.
+    """
     pages: set[int] = set()
+    order: List[int] = []
     for element in elements:
-        if _is_toc_header(element.text):
-            pages.update(range(element.page, element.page + 5))
+        if element.page not in order:
+            order.append(element.page)
+    signals: Dict[int, int] = {}
+    totals: Dict[int, int] = {}
+    for element in elements:
+        totals[element.page] = totals.get(element.page, 0) + 1
+        text = element.text or ""
+        if _DOTTED_LEADERS_RE.search(text) or (
+                element.html and _DOTTED_LEADERS_RE.search(element.html)):
+            signals[element.page] = signals.get(element.page, 0) + 1
+        elif re.search(r"\s\d{1,3}$", (text or "").strip()):
+            signals[element.page] = signals.get(element.page, 0) + 1
+
+    for element in elements:
+        if not _is_toc_header(element.text):
+            continue
+        pages.add(element.page)
+        try:
+            position = order.index(element.page)
+        except ValueError:
+            continue
+        for page in order[position + 1:]:
+            if page > element.page + 4:
+                break
+            count = totals.get(page, 0)
+            if count and signals.get(page, 0) / count >= 0.4:
+                pages.add(page)
+            else:
+                break
     return pages
+
 
 
 def _height_level_map(elements: Sequence[RawElement]) -> Dict[str, int]:
@@ -896,6 +1061,35 @@ def _resolve_title(title_index: Optional[Mapping[str, Tuple[str, int]]],
     return None
 
 
+def _calibrate_toc_offset(toc: Sequence["TocEntry"],
+                          title_index: Optional[Mapping[str, Tuple[str, int]]]
+                          ) -> int:
+    """Сдвиг печатных страниц TOC относительно PDF (2016: +3).
+
+    В части отчётов оглавление ссылается на печатную нумерацию, а элементы
+    парсера — на PDF-страницы. Сдвиг оценивается по точным совпадениям имён
+    TOC и Title тела; применяется только при устойчивом большинстве.
+    """
+    if not toc or not title_index:
+        return 0
+    offsets: List[int] = []
+    for entry in toc:
+        if entry.page is None or not entry.name:
+            continue
+        resolved = title_index.get(normalize_section_name(entry.name))
+        if resolved is None:
+            continue
+        offsets.append(int(resolved[1]) - int(entry.page))
+    if len(offsets) < 3:
+        return 0
+    offset, support = Counter(offsets).most_common(1)[0]
+    if support < max(3, len(offsets) // 3):
+        return 0
+    if not -20 <= offset <= 20:
+        return 0
+    return int(offset)
+
+
 def _skeleton_entries(toc: Sequence["TocEntry"], outline: Sequence[Any],
                       height_by_name: Mapping[str, int],
                       last_page: Optional[int] = None,
@@ -906,7 +1100,15 @@ def _skeleton_entries(toc: Sequence["TocEntry"], outline: Sequence[Any],
     Сырые ``Title`` от Unstructured содержат десятки рекламных подзаголовков и
     наград, поэтому деревом они быть не могут. Оглавление/закладки — это
     собственный «контракт структуры» отчёта: имена и страницы уже выверены.
+
+    Для 2016–2018 добавлено:
+    - калибровка печатных страниц TOC по Title тела (иначе 2016 смещён на 3);
+    - части оглавления (``TocEntry.group``) как level 0, их строки — level 1;
+    - плоские закладки (2018: 162 из 172 одного уровня) переуровниваются по
+      нумерации заголовков (``1 Портрет Группы`` → 0, ``3.1 ...`` → 1).
     """
+    toc_offset = _calibrate_toc_offset(toc, title_index)
+
     outline_all: List[Tuple[str, int, int, int]] = []
     for index, item in enumerate(outline or []):
         title, level, page = _outline_parts(item)
@@ -917,23 +1119,56 @@ def _skeleton_entries(toc: Sequence["TocEntry"], outline: Sequence[Any],
         outline_all.append((_display_title(title), max(0, min(level, 3)),
                             int(page), index))
     outline_total = len(outline_all)
+
+    # Плоские закладки (2018) несут уровень 0 у почти всех пунктов. Иерархию
+    # восстанавливаем по нумерации: явный номер задаёт уровень, следующие без
+    # номера — дети последнего явного пункта.
+    if outline_total >= 10:
+        level_counts = Counter(item[1] for item in outline_all)
+        dominant_level, dominant_count = level_counts.most_common(1)[0]
+        if dominant_count / outline_total >= 0.85:
+            relabeled: List[Tuple[str, int, int, int]] = []
+            last_explicit: Optional[int] = None
+            for title, _level, page, index in outline_all:
+                explicit = infer_title_level(title)
+                if explicit is None and re.match(
+                        r"^\d{1,2}\s+[A-ZА-ЯЁ][a-zа-яё]+", title):
+                    # 2018: части набраны «1 Портрет Группы», «2 Стратегический
+                    # отчет» — без точки, но это те же level 0.
+                    explicit = 0
+                if explicit is not None:
+                    level = explicit
+                    last_explicit = explicit
+                elif last_explicit is not None:
+                    level = min(last_explicit + 1, 3)
+                else:
+                    level = dominant_level
+                relabeled.append((title, level, page, index))
+            outline_all = relabeled
+
     outline_raw = [item for item in outline_all
                    if last_page is None or item[2] <= last_page]
 
-    toc_raw: List[Tuple[str, int, int, int]] = []
+    toc_raw: List[Tuple[str, int, int, float]] = []
+    groups: Dict[str, List[Tuple[int, int]]] = {}
     for index, entry in enumerate(toc or []):
         if not entry.name or is_junk_title(entry.name):
             continue
-        key = normalize_section_name(entry.name)
+        clean_name = _clean_toc_name(entry.name)
+        if not clean_name:
+            continue
+        key = normalize_section_name(clean_name)
         if not key:
             continue
         page = entry.page
-        display_name = _display_title(entry.name)
+        if page is not None:
+            page = int(page) + toc_offset
+        display_name = clean_name
         resolved = _resolve_title(title_index, key)
         if resolved is not None:
             body_name, body_page = resolved
             # Заменяем обрывок TOC («Сбербанка и», «в 2017 году») полным
-            # заголовком из тела; страницу берём из тела, если TOC её не дал.
+            # заголовком из тела; страницу берём из тела, если TOC её не дала.
             if page is None or abs(int(page) - int(body_page)) <= 2:
                 display_name = body_name
                 page = body_page
@@ -941,11 +1176,63 @@ def _skeleton_entries(toc: Sequence["TocEntry"], outline: Sequence[Any],
             continue
         if last_page is not None and int(page) > last_page:
             continue
-        # Без нумерации TOC не даёт надёжной иерархии: делаем плоский список,
-        # а не выдумываем родителей по высоте bbox (это дало ложные поддеревья).
-        level = entry.level if entry.level is not None else 0
-        toc_raw.append((display_name, max(0, min(level, 3)),
-                        int(page), index))
+        # Обрывок имени остаётся обрывком, даже если в теле нашёлся такой же
+        # битый Title («в 2017 году», «Сбербанка и»).
+        if _is_dangling_fragment(display_name):
+            continue
+        # Короткий обрывок на служебном слове («Сбербанка», «Цели в области»)
+        # — не раздел. Полные заголовки из тела (3+ слова) сохраняем.
+        if entry.group and _is_fragment_tail(display_name):
+            continue
+        if entry.group:
+            group_name = _display_title(entry.group)
+            groups.setdefault(group_name, []).append((int(page), index))
+        if entry.level is not None:
+            level = max(0, min(entry.level, 3))
+        elif entry.group:
+            level = 1
+        else:
+            level = 0
+        toc_raw.append((display_name, level, int(page), float(index)))
+
+    # Части TOC → level 0. Начало части — первая по порядку чтения строка.
+    # Если строка помечена частью, но её страница РАНЬШЕ начала части (2016:
+    # таблица со стр. 6 прочитана после «Приложений», но относится к
+    # «Стратегическому отчету»), перекладываем её по диапазону страниц.
+    group_starts: List[Tuple[int, float, str]] = []
+    if groups:
+        ordered_groups = sorted(
+            groups.items(),
+            key=lambda item: min(index for _page, index in item[1]))
+        last_start = -1
+        for group_name, members in ordered_groups:
+            page, first_index = min(members, key=lambda item: item[1])
+            page = max(int(page), last_start)
+            group_starts.append((page, float(first_index), group_name))
+            last_start = page
+        starts_by_name = {name: start for start, _first, name in group_starts}
+        leveled: List[Tuple[str, int, int, float]] = []
+        for title, level, page, order in toc_raw:
+            if level == 0 and _NUMBERED.match(title):
+                leveled.append((title, level, page, order))
+                continue
+            original = next((name for name, members in groups.items()
+                             if (page, order) in members), None)
+            parent: Optional[str] = original
+            original_start = starts_by_name.get(original) if original else None
+            if original is None or (original_start is not None
+                                    and original_start > page):
+                parent = None
+                for start, _first, group_name in group_starts:
+                    if start <= page:
+                        parent = group_name
+                    else:
+                        break
+            leveled.append((title, 1 if parent else level, page, order))
+        toc_raw = leveled
+
+    for start, first_index, group_name in group_starts:
+        toc_raw.append((group_name, 0, int(start), float(first_index) - 0.5))
 
     # Один источник — основной. Закладки чище и полнее; TOC используем, когда
     # закладок нет, или чтобы закрыть ранние страницы, которые закладки 2018
@@ -967,10 +1254,15 @@ def _skeleton_entries(toc: Sequence["TocEntry"], outline: Sequence[Any],
     primary.sort(key=lambda item: (item[2], item[3]))
     result: List[Tuple[str, int, int]] = []
     for title, level, page, _ in primary:
-        if any((_very_similar_names(title, existing[0])
-                or (_similar_names(title, existing[0])
-                    and abs(page - existing[2]) <= 2))
-               for existing in result):
+        # Нумерованные части («4 Корпоративное управление») повторяют имя
+        # раннего подраздела, но это другой раздел — дедуп к ним не применяем.
+        numbered_part = bool(_NUMBERED.match(title)) or bool(
+            re.match(r"^\d{1,2}\s+[A-ZА-ЯЁ][a-zа-яё]+", title))
+        if not numbered_part and any(
+                (_very_similar_names(title, existing[0])
+                 or (_similar_names(title, existing[0])
+                     and abs(page - existing[2]) <= 2))
+                for existing in result):
             continue
         result.append((title, level, page))
     return result
