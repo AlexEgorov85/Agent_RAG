@@ -55,6 +55,19 @@ def _env_flag(name: str, default: bool) -> bool:
     return raw.strip().casefold() in _TRUTHY
 
 
+def _env_int(name: str, default: int) -> int:
+    """Читает целочисленный runtime-override из env; мусор оставляет default."""
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw.strip())
+    except ValueError:
+        warnings.warn(f"{name}={raw!r} is not an integer, using {default}",
+                      RuntimeWarning, stacklevel=2)
+        return default
+
+
 def _structure_backend(structure_dir: Path):
     """Инструмент чтения дерева разделов из локальных артефактов."""
 
@@ -525,6 +538,10 @@ def create_agent_service(
             reranker=reranker,
             max_candidates=settings.candidates,
             base_candidate_k=settings.rerank_pool,
+            # Структурный канал: соседи по разделу (CONTAINS) и странице.
+            # Выключен при ``GRAPH_STRUCTURE_BUDGET=0``; бюджет измерен офлайн
+            # (tmp_graph_ab/structure_budget_probe.py), см. spec_graph.md §8.6.
+            structure_budget=_env_int("GRAPH_STRUCTURE_BUDGET", 2),
         )
 
     tools = AgentTools(

@@ -619,6 +619,10 @@ output: documents, section_matches, structural_changes, warnings
 - `get_entities` вызывается селектором только при непустых `plan.entities` и вопросе о связях; после него обязателен `get_chunk` или поиск по evidence ids.
 - `get_entities` — опциональный путь. Если router не выделил сущности, relation-вопрос обслуживается через `use_graph=True`, без отдельного NER в агенте.
 - `graph_added=0` — валидный результат, не ошибка.
+- Структурные соседи (по разделу `CONTAINS` и странице) тоже попадают в
+  `graph_evidence_manifest`, но с пустым `matched_entities`: путь в трейсе —
+  `chunk:<сид> → section → chunk:<сосед>`, скорее объяснение соседства, чем
+  ссылка на сущность.
 - Graph backend недоступен → hybrid + `graph_unavailable`; tool call считается completed.
 - При `retrieval_mode="dense"`/`"keyword"` graph-обёртка отключается с warning: граф работает только поверх hybrid-базы.
 

@@ -564,3 +564,83 @@ def test_importance_mode_widens_base_pool_and_interleaves_graph():
     assert "c1" in sent and "c2" in sent
     assert [item.chunk_id for item in result.hits][0] == "c1"
     assert result.hits[0].rerank_score == 3
+
+
+def structural_graph() -> nx.MultiDiGraph:
+    """Граф без сущностей: чанки d1 на страницах 3/3/4/9 в одном разделе."""
+    graph = nx.MultiDiGraph()
+    graph.add_node(
+        "section:d1:Risks", type="Section", doc_id="d1",
+        section_path="Risks", level=0, title="Risks",
+    )
+    for chunk_id, page in (("c1", 3), ("c2", 3), ("c3", 4), ("c4", 9)):
+        graph.add_node(
+            f"chunk:{chunk_id}", type="Chunk", chunk_id=chunk_id,
+            doc_id="d1", year=2023, issuer="Bank", kind="text",
+            page_pdf=page,
+        )
+    for chunk_id in ("c1", "c2", "c3"):
+        graph.add_edge(
+            "section:d1:Risks", f"chunk:{chunk_id}",
+            key="contains", type="CONTAINS",
+        )
+    return graph
+
+
+def test_structure_budget_expands_base_hits_without_entity_match():
+    base = FakeBase([hit("c1")])
+    retriever = GraphAugmentedRetriever(
+        base,
+        structural_graph(),
+        store("c1", "c2", "c3", "c4"),
+        structure_budget=2,
+    )
+
+    result = retriever.retrieve("вопрос без имён")
+
+    assert [item.chunk_id for item in result.hits] == ["c1", "c2", "c3"]
+    assert result.trace.graph_candidates == 2
+    assert result.trace.graph_added == 2
+    assert result.trace.graph_matched_entities == []
+    stage = {item["chunk_id"]: item for item in result.trace.stages["graph"]}
+    assert stage["c2"]["score"] == pytest.approx(0.25)
+    assert stage["c2"]["evidence_chunk_ids"] == ["c1", "c2"]
+    assert stage["c2"]["path"] == [
+        "chunk:c1", "section:d1:Risks", "chunk:c2"]
+    assert retriever.graph_evidence_manifest(result) == ["c2", "c3"]
+
+
+def test_structure_budget_is_off_by_default_and_respects_filters():
+    base = FakeBase([hit("c1")])
+
+    off = GraphAugmentedRetriever(
+        base, structural_graph(), store("c1", "c2", "c3"), graph_max_results=0,
+    ).retrieve("вопрос без имён")
+    assert [item.chunk_id for item in off.hits] == ["c1"]
+
+    filtered = GraphAugmentedRetriever(
+        base, structural_graph(), store("c1", "c2", "c3"), structure_budget=2,
+    ).retrieve("вопрос без имён", filters=SearchFilters(years=[2022]))
+    assert [item.chunk_id for item in filtered.hits] == ["c1"]
+    assert filtered.trace.graph_candidates == 0
+
+
+def test_structure_budget_never_repeats_entity_candidates(monkeypatch):
+    base = FakeBase([hit("c1")])
+    retriever = GraphAugmentedRetriever(
+        base, structural_graph(), store("c1", "c2", "c3"), structure_budget=2,
+    )
+
+    monkeypatch.setattr(
+        graph_hybrid, "retrieve_graph",
+        lambda graph, entity_ids, **kwargs: [
+            GraphRetrievalResult("c2", 1.0, (ENTITY_ID,), (), ("c1",)),
+        ],
+    )
+    retriever.entity_matcher = lambda query, graph=None: [ENTITY_ID]
+
+    result = retriever.retrieve("credit risk")
+
+    assert [item.chunk_id for item in result.hits] == ["c1", "c2", "c3"]
+    assert len({item.chunk_id for item in result.hits}) == 3
+    assert result.trace.graph_candidates == 2

@@ -184,6 +184,115 @@ def retrieve_graph(
     ]
 
 
+def structural_neighbors(
+    graph: nx.MultiDiGraph,
+    chunk_id: str,
+    *,
+    budget: int = 2,
+    doc_ids: set[str] | None = None,
+    years: set[int] | None = None,
+    issuers: set[str] | None = None,
+    section_path: str | None = None,
+) -> list[str]:
+    """Соседние чанки по структуре: раздел (``CONTAINS``) и страница.
+
+    Возвращает до ``budget`` ``chunk_id`` того же документа, упорядоченных по
+    расстоянию в страницах от исходного чанка. Раздел даёт соседей даже на
+    соседних страницах, страница — чанки той же страницы, которых нет в разделе
+    (врезки, таблицы). Собственный чанк и чанки, не прошедшие фильтры, не
+    попадают в результат; при равном расстоянии порядок определяется ``chunk_id``,
+    поэтому результат детерминирован.
+    """
+    if budget <= 0:
+        return []
+    node_id = f"chunk:{chunk_id}"
+    if node_id not in graph:
+        return []
+    seed_attrs = graph.nodes[node_id]
+    if seed_attrs.get("type") != "Chunk":
+        return []
+    doc_id = str(seed_attrs.get("doc_id") or "")
+    seed_page = _page(seed_attrs)
+
+    ordered: dict[str, tuple[int, str]] = {}
+    for parent in sorted(graph.predecessors(node_id)):
+        if graph.nodes[parent].get("type") != "Section":
+            continue
+        for _, target, attrs in graph.out_edges(parent, data=True):
+            if attrs.get("type") != "CONTAINS" or target == node_id:
+                continue
+            _remember_neighbor(
+                ordered, graph, target, seed_page,
+                doc_ids, years, issuers, section_path,
+            )
+    for candidate in graph.nodes:
+        if candidate == node_id:
+            continue
+        if not _same_page(graph, candidate, doc_id, seed_page):
+            continue
+        _remember_neighbor(
+            ordered, graph, candidate, seed_page,
+            doc_ids, years, issuers, section_path,
+        )
+    ranked = sorted(ordered.items(), key=lambda item: item[1])
+    return [candidate_id for candidate_id, _ in ranked[:budget]]
+
+
+def _remember_neighbor(
+    ordered: dict[str, tuple[int, str]],
+    graph: nx.MultiDiGraph,
+    candidate: str,
+    seed_page: int | None,
+    doc_ids: set[str] | None,
+    years: set[int] | None,
+    issuers: set[str] | None,
+    section_path: str | None,
+) -> None:
+    """Запоминает кандидата, если он существует, подходит и ближе прежнего."""
+    attrs = graph.nodes[candidate]
+    if attrs.get("type") != "Chunk":
+        return
+    candidate_id = str(attrs.get("chunk_id") or "")
+    if not candidate_id:
+        return
+    if not _eligible(graph, candidate, attrs, doc_ids, years, issuers, section_path):
+        return
+    candidate_page = _page(attrs)
+    if candidate_page is None or seed_page is None:
+        distance = 1 << 30
+    else:
+        distance = abs(candidate_page - seed_page)
+    previous = ordered.get(candidate_id)
+    key = (distance, candidate_id)
+    if previous is None or key < previous:
+        ordered[candidate_id] = key
+
+
+def _page(attrs: dict[str, Any]) -> int | None:
+    """Номер страницы чанка как ``int`` (``None``, если метаданных нет)."""
+    value = attrs.get("page_pdf")
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _same_page(
+    graph: nx.MultiDiGraph, candidate: str, doc_id: str, seed_page: int | None
+) -> bool:
+    """Совпадает ли чанк-кандидат с сидом по документу и странице."""
+    if seed_page is None:
+        return False
+    attrs = graph.nodes[candidate]
+    if attrs.get("type") != "Chunk":
+        return False
+    if str(attrs.get("doc_id") or "") != doc_id:
+        return False
+    return _page(attrs) == seed_page
+
+
 def _eligible_evidence(
     graph: nx.MultiDiGraph,
     evidence: Iterable[Any],

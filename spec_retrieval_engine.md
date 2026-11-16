@@ -4,7 +4,7 @@
 **Статус:** целевой контракт. Retrieval/engine реализованы (BM25 + dense + RRF,
 reranker, filters, rewriting, diversity, graph augmentation, context packing,
 answer/citations/abstain) и покрыты тестами. Полный корпус не собран, полный
-graph index не построен (используется dev-граф `66c0dbe3…`). На dev-корпусе
+graph index не построен (используется dev-граф `a8ce50f6…`). На dev-корпусе
 реальный smoke даёт Recall@5 0.955; последний полный прогон 30 тестов —
 Recall@5 0.889, Recall@10 0.926, MRR 0.889, `pass_rate 0.767` (предыдущий —
 Recall@5 0.845, `pass_rate 0.8`). Recall@5 превышает целевой порог 0.85, но
@@ -101,6 +101,10 @@ answer_mode: concise | comparison | outline
    кандидатов. Dense использует query-prefix, совместимый с выбранной embedding-моделью.
 5. При `needs_graph=True` получить ограниченный список связанных chunks из
    `graph_retriever`; graph-результаты включаются в fusion с отдельным ranking list.
+   Помимо сущностного канала (`MENTIONS`/`RELATED_TO`) обёртка расширяет верхние
+   базовые хиты структурными соседями по разделу (`CONTAINS`) и странице —
+   `GRAPH_STRUCTURE_BUDGET` соседей на сид (production: 2, `0` — выключено),
+   со скором ниже любой сущностной находки (`spec_graph.md` §5, §8.6).
 6. Слить ranking lists методом RRF (`constant=60`); дедупликация по `chunk_id`, tie
    сохраняет исходный порядок. Если в текущем API RRF есть аргумент `k` для длины
    выдачи, он не должен смешиваться с `constant`.

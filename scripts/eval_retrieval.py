@@ -143,7 +143,14 @@ def main(argv: list[str] | None = None) -> int:
                         help="Ограничить число вопросов для быстрой проверки")
     parser.add_argument("--include-relation-evidence", action="store_true",
                         help="Добавлять evidence соседних сущностей по RELATED_TO")
+    parser.add_argument("--structure-budget", type=int, default=0,
+                        help="Сколько структурных соседей (раздел/страница) "
+                             "добавлять на один базовый хит; 0 — выключено")
     args = parser.parse_args(argv)
+
+    if args.structure_budget < 0:
+        print("--structure-budget должен быть неотрицательным")
+        return 2
 
     api_key = os.getenv("LLM_API_KEY")
     base_url = os.getenv("LLM_BASE_URL")
@@ -227,6 +234,7 @@ def main(argv: list[str] | None = None) -> int:
         "graph": str(graph_path),
         "questions": len(questions),
         "relation_evidence": args.include_relation_evidence,
+        "structure_budget": args.structure_budget,
         "pools": {},
         "baselines": {},
     }
@@ -272,6 +280,7 @@ def main(argv: list[str] | None = None) -> int:
             base_candidate_k=pool,
             graph_max_results=10,
             include_relation_evidence=args.include_relation_evidence,
+            structure_budget=args.structure_budget,
         )
         per_question: list[dict[str, Any]] = []
         latencies: list[float] = []

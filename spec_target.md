@@ -44,7 +44,7 @@ Graph RAG — расширение retrieval, а не обязательный �
 | Чанки | `pdf_to_chunks.py`, `chunk_enricher.py`, CLI; 3928 чанков для 2015–2018 (98% со структурой) и отдельный dev-корпус из 4 документов (1025 чанков) | Корпус чанков с метаданными, структурой и валидацией |
 | Dense/keyword retrieval | BM25 + dense, RRF, metadata/structure eligibility, filters, rewriting, diversity, `RetrievalTrace`; dense — постоянный FAISS `IndexFlatIP` с fallback на in-memory `DenseIndex` | Dense + BM25 с metadata/structure eligibility |
 | Router/reranker/generation | LLM/Simple router, selector, CoverageReport, verification и repair, calculations, answer с citations/abstain, retrieval fallback для structural-запросов — реализованы | Query planning, hybrid retrieval, reranking, ответ с citations/abstain |
-| Graph | Graph builder/retriever, `GraphAugmentedRetriever`, `use_graph`, provenance и fallback; в фабрике активен полный dev-граф `66c0dbe3…` (536 чанков, 2022–2023); полный `b288dd3c…` собран на 1916/3928 и имеет `status=incomplete` | Индекс разделов/чанков/сущностей и ограниченный graph retrieval |
+| Graph | Graph builder/retriever, `GraphAugmentedRetriever`, `use_graph`, provenance и fallback; структурное расширение по `CONTAINS`/странице (`GRAPH_STRUCTURE_BUDGET=2`); в фабрике активен полный dev-граф `a8ce50f6…` (536 чанков, 2022–2023, 163 раздела, `CONTAINS` 485/536); полный `b288dd3c…` собран на 1916/3928 и имеет `status=incomplete` | Индекс разделов/чанков/сущностей и ограниченный graph retrieval |
 | UI | Streamlit: чат, citations, coverage metric×year, verification, retrieval stages, structure, graph-only evidence, ссылки на PDF; React WebUI этапов 1–4 (чат, история, evidence, таблицы/графики/CSV, структурное сравнение, cancel/resync, Evaluation UI) | Streamlit — legacy, React — целевой UI |
 | Eval | `eval/`: dataset validation, metrics, runner, report, judge-интерфейс; датасет 30 тестов (10/10/5/5), 12 smoke + 6 holdout; реальный smoke 12/12, последний полный прогон 23/30 (`pass_rate 0.767`), предыдущий 24/30 | Версионируемый датасет, retrieval и answer metrics, отчёты |
 | API / React WebUI | `src/api/` — полный adapter (CRUD, SSE, evidence, PDF `inline`, capabilities); `frontend/` — React-чат этапов 1–4 (citations `[n]`, PDF-ссылки, таблицы/графики/CSV, структурное сравнение, cancel/resync) и Evaluation UI; E2E 7/7, 160 unit-тестов в 24 файлах | HTTP API и React WebUI по `docs/specs/*` |
@@ -69,8 +69,8 @@ holdout 4/6), артефакт `eval/results/20261115_183541_0a97989/`. Пред
 - полный корпус 9 PDF: документы 2019–2024 не парсились, производные артефакты
   и `verify_corpus.py` относятся только к 2015–2018;
 - полный graph index: `b288dd3c…` собран на 1916/3928 чанков и имеет
-  `status=incomplete`; активен только dev-граф `66c0dbe3…` (536 чанков,
-  2022–2023);
+  `status=incomplete`; активен только dev-граф `a8ce50f6…` (536 чанков,
+  2022–2023, 163 раздела);
 - benchmark на полном корпусе и `expected_corpus_sha256` для него: текущие
   цифры (23/30) получены на dev-корпусе из 1025 чанков; holdout пересекается
   с dev по gold-чанкам в 4 тестах (`holdout_gold_overlap`);

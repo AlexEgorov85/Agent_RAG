@@ -9,6 +9,12 @@
   ``graph_score`` по убыванию, затем по ``chunk_id``;
 * дубликаты отбрасываются: чанк, уже возвращённый базой, не добавляется дважды.
 
+Помимо сущностного канала (`MENTIONS`/`RELATED_TO`) обёртка умеет структурное
+расширение: верхние базовые хиты дополняются соседями по разделу (`CONTAINS`) и
+по странице — не больше ``structure_budget`` на сид. Такие кандидаты получают
+``graph_score=STRUCTURE_GRAPH_SCORE`` (ниже любой сущностной находки), поэтому
+могут лишь пополнить пул перед реранжированием, но не вытеснить доказанное.
+
 Поддерживаются две политики отбора:
 
 * **по количеству** (по умолчанию): ``top_k`` — жёсткий потолок, при равенстве
@@ -62,7 +68,11 @@ import networkx as nx
 
 from src.graph.graph_models import GraphRetrievalResult
 from src.retrieval.bm25 import tokenize as _tokenize
-from src.retrieval.graph_retriever import resolve_entity_ids, retrieve_graph
+from src.retrieval.graph_retriever import (
+    resolve_entity_ids,
+    retrieve_graph,
+    structural_neighbors,
+)
 from src.retrieval.hybrid_retriever import (
     RRF_CONSTANT,
     RetrievalHit,
@@ -75,6 +85,11 @@ from src.retrieval.reranker import MAX_CANDIDATES as RERANKER_MAX_CANDIDATES
 #: Оценки реранкера — калиброванные целые 0..3; значение не ниже
 #: ``DEFAULT_RELEVANCE_THRESHOLD`` считается релевантным свидетельством.
 DEFAULT_RELEVANCE_THRESHOLD = 2
+
+#: Графовый скор структурных соседей. Ниже любой сущностной находки
+#: (прямое упоминание — 1.0, глубина 1 — 0.5, глубина 2 — 0.33), поэтому
+#: структурный кандидат никогда не вытесняет доказанный сущностный.
+STRUCTURE_GRAPH_SCORE = 0.25
 
 #: ``entity_matcher(query, graph)`` или короткая форма ``entity_matcher(query)``.
 #: Может вернуть ID узлов-сущностей или имена/псевдонимы; обёртка разрешает оба.
@@ -447,6 +462,12 @@ class GraphAugmentedRetriever:
         base_candidate_k: Сколько базовых кандидатов запрашивать, когда обёртка
             сама реранжирует. По умолчанию ``max_candidates``, чтобы решал
             бюджет, а не произвольный top-5.
+        structure_budget: Сколько структурных соседей добавлять на один
+            базовый хит (0 — канал выключен). Соседи берутся по рёбрам
+            ``CONTAINS`` раздела и по странице, ближайшие первыми.
+        structure_seed_k: Сколько верхних базовых хитов служат сидами для
+            структурного расширения.
+        structure_max_results: Потолок структурных кандидатов на запрос.
     """
 
     def __init__(
@@ -464,11 +485,20 @@ class GraphAugmentedRetriever:
         relevance_threshold: int | None = None,
         max_candidates: int = RERANKER_MAX_CANDIDATES,
         base_candidate_k: int | None = None,
+        structure_budget: int = 0,
+        structure_seed_k: int = 5,
+        structure_max_results: int = 8,
     ) -> None:
         if graph_depth < 0:
             raise ValueError("graph_depth must be non-negative")
         if graph_max_results < 0:
             raise ValueError("graph_max_results must be non-negative")
+        if structure_budget < 0:
+            raise ValueError("structure_budget must be non-negative")
+        if structure_seed_k < 0:
+            raise ValueError("structure_seed_k must be non-negative")
+        if structure_max_results < 0:
+            raise ValueError("structure_max_results must be non-negative")
         if (
             isinstance(max_candidates, bool)
             or not isinstance(max_candidates, int)
@@ -510,6 +540,9 @@ class GraphAugmentedRetriever:
         self.reranker = reranker
         self.relevance_threshold = relevance_threshold
         self.max_candidates = int(max_candidates)
+        self.structure_budget = int(structure_budget)
+        self.structure_seed_k = int(structure_seed_k)
+        self.structure_max_results = int(structure_max_results)
         if base_candidate_k is None:
             self.base_candidate_k = self.max_candidates if reranker is not None else 0
         else:
@@ -608,6 +641,64 @@ class GraphAugmentedRetriever:
             loaded.values(),
             key=lambda pair: (-_graph_score(pair[0]), pair[0].chunk_id),
         )
+
+    def _structure_candidates(
+        self,
+        base_hits: Sequence[RetrievalHit],
+        filters: SearchFilters,
+        *,
+        excluded: set[str],
+    ) -> list[GraphRetrievalResult]:
+        """Структурные соседи верхних базовых хитов (раздел + страница).
+
+        Канал отвечает на «что рядом с этим свидетельством» и не требует
+        совпадения сущностей, поэтому работает и на запросах без имён. Скор
+        намеренно ниже любого сущностного: структурный кандидат добавляется к
+        пулу, а не вытесняет доказанный.
+        """
+        if self.structure_budget <= 0 or self.structure_max_results <= 0:
+            return []
+        seeds = [
+            str(hit.chunk_id) for hit in base_hits[: self.structure_seed_k]
+            if str(getattr(hit, "chunk_id", "") or "")
+        ]
+        if not seeds:
+            return []
+        seen = set(excluded)
+        results: list[GraphRetrievalResult] = []
+        for seed in seeds:
+            neighbours = structural_neighbors(
+                self.graph,
+                seed,
+                budget=self.structure_budget,
+                doc_ids=filters.allowed_doc_ids,
+                years=filters.requested_years() or None,
+                issuers=filters.issuers,
+                section_path=filters.section_path_prefix,
+            )
+            for neighbour in neighbours:
+                if neighbour in seen:
+                    continue
+                seen.add(neighbour)
+                results.append(GraphRetrievalResult(
+                    chunk_id=neighbour,
+                    graph_score=STRUCTURE_GRAPH_SCORE,
+                    matched_entities=(),
+                    path=self._structure_path(seed, neighbour),
+                    evidence_chunk_ids=(seed, neighbour),
+                ))
+                if len(results) >= self.structure_max_results:
+                    return results
+        return results
+
+    def _structure_path(self, seed: str, neighbour: str) -> tuple[str, ...]:
+        """Путь-объяснение: сид → общий раздел (если есть) → сосед."""
+        seed_node = f"chunk:{seed}"
+        sections = sorted(
+            parent for parent in self.graph.predecessors(seed_node)
+            if self.graph.nodes[parent].get("type") == "Section"
+        )
+        return (seed_node, *sections, f"chunk:{neighbour}")
 
     @staticmethod
     def _diagnostics(results: Iterable[GraphRetrievalResult]) -> list[dict[str, Any]]:
@@ -821,6 +912,14 @@ class GraphAugmentedRetriever:
                         max_depth=self.graph_depth,
                         max_results=self.graph_max_results,
                         include_relation_evidence=self.include_relation_evidence,
+                    ))
+                if self.structure_budget > 0:
+                    # Структурный канал не зависит от найденных сущностей: он
+                    # расширяет верхние базовые хиты по разделу и странице.
+                    graph_results.extend(self._structure_candidates(
+                        hits,
+                        effective,
+                        excluded=base_ids | {item.chunk_id for item in graph_results},
                     ))
                 trace.graph_candidates = len(graph_results)
                 trace.graph_results = self._diagnostics(graph_results)

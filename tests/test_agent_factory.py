@@ -572,3 +572,38 @@ def test_factory_passes_shared_reranker_to_graph_backend(
     assert backend.reranker is not None
     assert backend.base_candidate_k == settings.rerank_pool
     assert backend.max_candidates == settings.candidates
+
+
+def test_graph_structure_budget_defaults_to_two_and_reads_env(
+    tmp_path: Path, fake_client: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.retrieval.graph_hybrid import GraphAugmentedRetriever
+
+    graph_dir = tmp_path / "graph"
+    _write_graph_artifact(graph_dir, "sber_2023:00001:c0")
+
+    monkeypatch.delenv("GRAPH_STRUCTURE_BUDGET", raising=False)
+    for name in ("default", "disabled", "fallback"):
+        (tmp_path / name).mkdir()
+    default_service = create_agent_service(
+        settings=_settings(tmp_path / "default"), client=fake_client,
+        use_reranker=False, graph_dir=graph_dir,
+    )
+    backend = default_service.tools.graph_search_backend
+    assert isinstance(backend, GraphAugmentedRetriever)
+    assert backend.structure_budget == 2
+
+    monkeypatch.setenv("GRAPH_STRUCTURE_BUDGET", "0")
+    disabled_service = create_agent_service(
+        settings=_settings(tmp_path / "disabled"), client=fake_client,
+        use_reranker=False, graph_dir=graph_dir,
+    )
+    assert disabled_service.tools.graph_search_backend.structure_budget == 0
+
+    monkeypatch.setenv("GRAPH_STRUCTURE_BUDGET", "не число")
+    with pytest.warns(RuntimeWarning):
+        fallback_service = create_agent_service(
+            settings=_settings(tmp_path / "fallback"), client=fake_client,
+            use_reranker=False, graph_dir=graph_dir,
+        )
+    assert fallback_service.tools.graph_search_backend.structure_budget == 2

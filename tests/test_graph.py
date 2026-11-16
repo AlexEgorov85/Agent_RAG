@@ -14,6 +14,7 @@ from src.retrieval.graph_retriever import (
     get_graph_subgraph,
     resolve_entity_ids,
     retrieve_graph,
+    structural_neighbors,
 )
 
 
@@ -229,3 +230,48 @@ def test_graph_load_rejects_schema_mismatch_and_dangling_edges(tmp_path):
     target.write_text(json.dumps(artifact), encoding="utf-8")
     with pytest.raises(ValueError, match="Dangling"):
         load_graph(target)
+
+
+def structural_graph() -> nx.MultiDiGraph:
+    graph = nx.MultiDiGraph()
+    graph.add_node(
+        "section:report_2023:Risk/Credit", type="Section", doc_id="report_2023",
+        section_path="Risks/Credit risk", level=1, title="Credit risk",
+    )
+    for chunk_id, page in (("c-a", 3), ("c-b", 3), ("c-c", 4), ("c-d", 9)):
+        graph.add_node(
+            f"chunk:{chunk_id}", type="Chunk", chunk_id=chunk_id,
+            doc_id="report_2023", year=2023, issuer="Example Bank",
+            kind="text", page_pdf=page,
+        )
+    for chunk_id in ("c-a", "c-b", "c-c"):
+        graph.add_edge(
+            "section:report_2023:Risk/Credit", f"chunk:{chunk_id}",
+            key="contains", type="CONTAINS",
+        )
+    return graph
+
+
+def test_structural_neighbors_prefer_same_page_then_section_order():
+    graph = structural_graph()
+
+    assert structural_neighbors(graph, "c-a", budget=1) == ["c-b"]
+    assert structural_neighbors(graph, "c-a", budget=2) == ["c-b", "c-c"]
+    # Сосед с другой страницы вне раздела не подмешивается.
+    assert "c-d" not in structural_neighbors(graph, "c-a", budget=3)
+
+
+def test_structural_neighbors_apply_filters_and_ignore_unknown_chunk():
+    graph = structural_graph()
+
+    assert structural_neighbors(graph, "c-a", budget=2, years={2022}) == []
+    assert structural_neighbors(graph, "c-a", budget=2, doc_ids={"other"}) == []
+    assert structural_neighbors(graph, "missing", budget=2) == []
+    assert structural_neighbors(graph, "c-a", budget=0) == []
+    # Фильтр по разделу отсекает чанки, у которых другой section_path.
+    assert structural_neighbors(
+        graph, "c-a", budget=2, section_path="Risks/Credit risk",
+    ) == ["c-b", "c-c"]
+    assert structural_neighbors(
+        graph, "c-a", budget=2, section_path="Other",
+    ) == []
