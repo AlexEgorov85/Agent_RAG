@@ -1,7 +1,7 @@
 {
   "schema_version": "1.1",
   "suite": "medium",
-  "expected_corpus_sha256": "c70aabb541d07f2d5e4e7da477521e9f2e50bfb63abaf89d8c0a459a5d227154",
+  "expected_corpus_sha256": "730a254696ed2f9698b6d4c0e9e1ebc328c2ac81306789680248746087130fee",
   "tests": [
     {
       "id": "medium_001",
@@ -93,7 +93,9 @@
               "sber_2020:00618:c0:b6a6a13b4d23",
               "sber_2020:03867:c0:a83f325325f6",
               "sber_2020:03910:c0:d0d23cbfadc5",
+              "sber_2020:04731:c0:67dbcf82f219",
               "sber_2020:04737:c0:4a2d61f1a3d7",
+              "sber_2020:04739:c0:f2da85b477cf",
               "sber_2020:04817:c0:e80b3c655e7d"
             ],
             "section": ""
@@ -456,7 +458,8 @@
           {
             "id": "dividends_2017",
             "any_of": [
-              "sber_2017:00368:c2:df79bfbefd40"
+              "sber_2017:00368:c2:df79bfbefd40",
+              "sber_2017:04025:c0:959d352b3d27"
             ],
             "section": ""
           }

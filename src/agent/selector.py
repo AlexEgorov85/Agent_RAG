@@ -812,6 +812,16 @@ class PlanAwareSelector:
                     rerank_per_year=True,
                 )
 
+        # Comparison-запрос с метриками решается несколькими циклами: широкий
+        # поиск, затем по одному адресному поиску на каждую пару
+        # (метрика, год), которая ещё не покрыта. Бюджет циклов — по числу
+        # лет, а не один gap-поиск.
+        comparison_with_metrics = (
+            plan.requires_comparison
+            and bool(plan.required_metrics)
+            and len(target_years) > 1
+        )
+
         # Широкий гибридный поиск — основной первый шаг. Граф подключается
         # после него и только как надстройка/добивка пропусков: сущность из
         # плана (например, метрика `net_profit`) может отсутствовать в графе
@@ -843,26 +853,30 @@ class PlanAwareSelector:
         # Адресная добивка по аспектам, которых нет в уже собранном evidence.
         # Coverage можно отключить; число gap-поисков ограничено отдельно от
         # общего бюджета (spec_agent_enhancement §4.8).
-        if not self.coverage_enabled or self._coverage_searches_used(attempts) >= (
-            self.max_coverage_searches
-        ):
+        if not self.coverage_enabled:
             return None
-        for label, year in aspect_search_candidates(state, plan):
-            filters = state.get("effective_filters") or SearchFilters()
-            if year is not None:
-                filters = replace(
+        coverage_budget = self.max_coverage_searches
+        if comparison_with_metrics:
+            coverage_budget = max(coverage_budget, len(target_years))
+        if self._coverage_searches_used(attempts) >= coverage_budget:
+            return None
+        if not comparison_with_metrics:
+            for label, year in aspect_search_candidates(state, plan):
+                filters = state.get("effective_filters") or SearchFilters()
+                if year is not None:
+                    filters = replace(
+                        filters,
+                        years={year},
+                        year_from=None,
+                        year_to=None,
+                    )
+                query = label if year is None else f"{label} {year} год"
+                return self._search_action(
+                    query,
                     filters,
-                    years={year},
-                    year_from=None,
-                    year_to=None,
+                    "fact_lookup",
+                    metric=label,
                 )
-            query = label if year is None else f"{label} {year} год"
-            return self._search_action(
-                query,
-                filters,
-                "fact_lookup",
-                metric=label,
-            )
 
         coverage = _coverage_for_state(state, plan)
 

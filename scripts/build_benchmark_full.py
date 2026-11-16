@@ -179,6 +179,11 @@ def _group(group_id: str, chunk_id: str) -> dict:
     }
 
 
+def _chunk_source(chunk: Mapping[str, Any]) -> str:
+    """????? ????? ?????? ? html: ????????? ???????? ????? ???? ?????? ? html."""
+    return f"{chunk.get('text') or ''} {chunk.get('html') or ''}"
+
+
 def _alternatives(
     *,
     anchor: str,
@@ -204,7 +209,7 @@ def _alternatives(
             continue
         if chunk.get("doc_id") != doc_id or chunk.get("year") != year:
             continue
-        text = chunk.get("text") or ""
+        text = _chunk_source(chunk)
         if keyword.casefold() not in text.casefold():
             continue
         if number not in _text_numbers(text):
@@ -660,7 +665,7 @@ def verify_tests(tests: list[dict], chunks: dict[str, dict]) -> list[str]:
                 if not candidates:
                     problems.append(f"{where}: у факта {fact['metric']} нет gold-чанка")
                     continue
-                if not any(expected in _text_numbers(chunk.get("text") or "")
+                if not any(expected in _text_numbers(_chunk_source(chunk))
                            for _, chunk in candidates):
                     problems.append(
                         f"{where}: значение {fact['value']} отсутствует в тексте "

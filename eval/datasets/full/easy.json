@@ -1,7 +1,7 @@
 {
   "schema_version": "1.1",
   "suite": "easy",
-  "expected_corpus_sha256": "c70aabb541d07f2d5e4e7da477521e9f2e50bfb63abaf89d8c0a459a5d227154",
+  "expected_corpus_sha256": "730a254696ed2f9698b6d4c0e9e1ebc328c2ac81306789680248746087130fee",
   "tests": [
     {
       "id": "easy_001",
@@ -263,6 +263,7 @@
               "sber_2018:04972:c1:070d18939442",
               "sber_2018:00436:c2:07e18bafac07",
               "sber_2018:04903:c0:7aa60d55a22e",
+              "sber_2018:04977:c0:f14e7a4ff459",
               "sber_2018:06171:c0:d6f2460f5c0f",
               "sber_2018:06179:c0:f1b7843a5575",
               "sber_2018:06183:c0:483043da46a0"
@@ -462,7 +463,9 @@
               "sber_2020:00618:c0:b6a6a13b4d23",
               "sber_2020:03867:c0:a83f325325f6",
               "sber_2020:03910:c0:d0d23cbfadc5",
+              "sber_2020:04731:c0:67dbcf82f219",
               "sber_2020:04737:c0:4a2d61f1a3d7",
+              "sber_2020:04739:c0:f2da85b477cf",
               "sber_2020:04817:c0:e80b3c655e7d"
             ],
             "section": ""

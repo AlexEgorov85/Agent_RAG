@@ -52,6 +52,8 @@ class MetricCell:
     metric: str | None = None
     #: Год взят из текста перед таблицей, а не из шапки: такие ячейки слабее.
     inferred: bool = False
+    #: Значение есть в текстовой версии чанка — её и цитирует ответ.
+    in_text: bool = False
 
 
 class _TableParser(HTMLParser):
@@ -321,7 +323,11 @@ def build_index(chunks: Iterable[Mapping[str, Any]]) -> MetricsIndex:
             if cell.metric is None or cell.inferred:
                 # Год из текста перед таблицей — подсказка, а не канон.
                 continue
-            score = (0 if _doc_year(cell.doc_id) == cell.year else 1, 0)
+            score = (
+                0 if cell.in_text else 1,
+                0 if not cell.inferred else 1,
+                0 if _doc_year(cell.doc_id) == cell.year else 1,
+            )
             candidates.setdefault((cell.metric, cell.year), []).append(
                 (score, cell)
             )
@@ -341,9 +347,9 @@ def build_index(chunks: Iterable[Mapping[str, Any]]) -> MetricsIndex:
             ),
         )
         best_cell = min(
-            (cell for _score, cell in items if cell.value == best_value),
-            key=lambda cell: _doc_year(cell.doc_id) != cell.year,
-        )
+            (item for item in items if item[1].value == best_value),
+            key=lambda item: item[0],
+        )[1]
         index.by_metric.setdefault(metric, {})[year] = {
             "value": best_cell.value,
             "unit": best_cell.unit,
