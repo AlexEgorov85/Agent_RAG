@@ -30,7 +30,7 @@ def fake_element(cat: str, text: str, page: int, depth=None, html=None, b64=None
         category=cat,
         text=text,
         metadata=SimpleNamespace(
-            page_number=page,          # курсовой протокол: abs. номер в metadata
+            page_number=page,          # протокол парсера: abs. номер в metadata
             category_depth=depth,
             text_as_html=html,
             image_base64=b64,
@@ -186,7 +186,7 @@ def test_page_number_read_from_metadata_page_number(monkeypatch, parser_env,
 
 
 def test_page_label_filled_from_pdf(monkeypatch, parser_env, three_page_pdf):
-    """Переиспользование курса (Занятие 2): у элементов заполнено курс-поле page_label."""
+    """Переиспользование контракта: у элементов заполнено поле page_label."""
     fake = fake_partition_factory(3)
     monkeypatch.setattr("unstructured.partition.pdf.partition_pdf", fake)
     result = parse_pdf(three_page_pdf, settings=parser_env)
@@ -197,8 +197,8 @@ def test_page_label_filled_from_pdf(monkeypatch, parser_env, three_page_pdf):
         assert el.page_label == str(el.page)
 
 
-def test_element_stolen_page_number_fails_like_course(monkeypatch, parser_env, three_page_pdf):
-    """Валидация из курса: элемент с чужим номером страницы роняет парсинг."""
+def test_element_stolen_page_number_fails_like_reference(monkeypatch, parser_env, three_page_pdf):
+    """Валидация контракта: элемент с чужим номером страницы роняет парсинг."""
     def broken_partition(*, file, strategy, infer_table_structure,
                          extract_image_block_types, extract_image_block_to_payload,
                          starting_page_number, languages, **_ignored):

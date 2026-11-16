@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import time
 import uuid
-import inspect
 import logging
 import re
 from dataclasses import asdict, is_dataclass, replace
@@ -24,6 +23,7 @@ from src.agent.agent_graph import (
     MAX_TOOL_CALLS,
     build_agent_graph,
 )
+from src.agent.metric_evidence import attach_metric_evidence
 from src.agent.smalltalk import smalltalk_reply
 from src.agent.state import (
     AgentEvent,
@@ -34,6 +34,8 @@ from src.agent.state import (
 )
 from src.agent.tools import AgentTools
 from src.agent.verification import verify_answer
+from src.core.introspection import supports_keyword
+from src.core.record import chunk_text
 from src.engine.calculations import format_calculations, summarize_facts
 from src.engine.prompts import format_structural_changes
 from src.retrieval.hybrid_retriever import SearchFilters
@@ -56,6 +58,7 @@ _HISTORY_SECRET_PATTERNS = (
 
 
 class Answerer(Protocol):
+    """Протокол генератора ответа с необязательными kwargs."""
     def generate(
         self,
         question: str,
@@ -64,8 +67,51 @@ class Answerer(Protocol):
         *,
         repair: bool = False,
         diagnostics: Mapping[str, Any] | None = None,
-    ) -> Any: ...
+    ) -> Any:
+        """Сформировать ``Answer`` по вопросу, evidence и манифесту."""
+        ...
 
+
+def _debug_generation_exception(exc: BaseException) -> None:
+    """Записать исключение генерации при ``RAG_DEBUG_GENERATION=1``."""
+    import os
+    import traceback
+    from pathlib import Path
+
+    if os.getenv("RAG_DEBUG_GENERATION") != "1":
+        return
+    try:
+        target = Path("logs") / "generation_debug.txt"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            "".join(traceback.format_exception(exc)), encoding="utf-8"
+        )
+    except OSError:
+        pass
+
+
+def _source_text_for(chunk: Any) -> str:
+    """Текст чанка (с html) для поиска дословной цитаты."""
+    return chunk_text(chunk, strip=True) if chunk is not None else ""
+
+
+def _metrics_chunk_ids() -> set[str]:
+    """chunk_id таблиц, попавших в справочник значений."""
+    from src.core.metrics_table import load_index
+
+    index = load_index()
+    return set(index.chunks) if index is not None else set()
+
+
+def _metrics_reference(plan: Any) -> list[dict[str, Any]]:
+    """Строки справочника значений для метрик и лет плана с подписью метрики."""
+    from src.agent.coverage import metric_label
+    from src.core.metrics_table import reference_rows
+
+    return [
+        {**row, "metric_label": metric_label(str(row.get("metric")))}
+        for row in reference_rows(plan)
+    ]
 
 def _value(value: Any, key: str, default: Any = None) -> Any:
     if isinstance(value, Mapping):
@@ -98,16 +144,12 @@ def _coverage_payload(value: Any) -> dict[str, Any] | None:
 
 def _filters_payload(value: Any) -> dict[str, Any] | None:
     """JSON-безопасное представление фильтров из ToolEvent.arguments."""
-    if value is None:
-        return None
     if isinstance(value, SearchFilters):
-        data: Mapping[str, Any] = vars(value)
-    elif isinstance(value, Mapping):
-        data = value
-    else:
+        return value.to_payload()
+    if not isinstance(value, Mapping):
         return None
     payload: dict[str, Any] = {}
-    for key, item in data.items():
+    for key, item in value.items():
         if isinstance(item, (set, frozenset)):
             payload[str(key)] = sorted(item)
         elif isinstance(item, (list, tuple)):
@@ -647,6 +689,7 @@ class AgentService:
         conversation_id: str,
         filters: SearchFilters | None = None,
     ) -> AgentRunResult:
+        """Синхронно выполнить один ход и вернуть терминальный результат."""
         events = list(self.stream(query, conversation_id=conversation_id, filters=filters))
         if events and events[-1].result is not None:
             return events[-1].result
@@ -671,6 +714,7 @@ class AgentService:
         conversation_id: str,
         filters: SearchFilters | None = None,
     ) -> Iterator[AgentEvent]:
+        """Выполнить ход и отдать безопасные события по мере выполнения."""
         request_id = str(uuid.uuid4())
         events: Queue[AgentEvent | None] = Queue()
         history = self._history_snapshot(conversation_id)
@@ -774,7 +818,11 @@ class AgentService:
                 config = {
                     "configurable": {"thread_id": f"{conversation_id}:{request_id}"}
                 }
-                state = graph.invoke(initial, config=config)
+                try:
+                    state = graph.invoke(initial, config=config)
+                except Exception as exc:
+                    _debug_generation_exception(exc)
+                    raise
                 answer = state["answer"]
                 status = "abstained" if answer.status == "abstain" else "completed"
                 timings = dict(state.get("timings", {}))
@@ -939,6 +987,34 @@ class AgentService:
             )
         return replace(answer, verification=verification.to_dict()), [warning]
 
+    @staticmethod
+    def _fix_citation_quotes(
+        answer: Answer,
+        evidence: Mapping[str, Any],
+    ) -> Answer:
+        """Сделать цитаты дословными фрагментами источников.
+
+        Модель перефразирует ``quote``, из-за чего проверка «цитата есть в
+        чанке» падает. Пересобираем цитату как дословное окно из текста
+        источника; если окно не нашлось, оставляем исходную цитату.
+        """
+        from src.engine.generator import _verbatim_quote
+
+        if answer.status != "answer" or not answer.citations:
+            return answer
+        fixed = []
+        changed = False
+        for citation in answer.citations:
+            source_text = _source_text_for(evidence.get(citation.chunk_id))
+            verbatim = _verbatim_quote(citation.quote, source_text)
+            if verbatim and verbatim != citation.quote:
+                citation = replace(citation, quote=verbatim)
+                changed = True
+            fixed.append(citation)
+        if not changed:
+            return answer
+        return replace(answer, citations=fixed)
+
     def _generate_answer(self, state: dict[str, Any]) -> tuple[Answer, list[str]]:
         # Контекст прошлого вызова не должен протечь в диагностику текущего:
         # если генератор не будет вызван, останется fallback evidence_manifest.
@@ -948,6 +1024,17 @@ class AgentService:
             plan = QueryPlan()
         manifest = set(state.get("evidence_manifest", set()))
         evidence = dict(state.get("evidence", {}))
+        attached = (
+            attach_metric_evidence(self.tools, plan, evidence, manifest)
+            if self.tools is not None
+            else []
+        )
+        if attached:
+            # Чанки таблиц должны жить в state: иначе повторная генерация
+            # (verification retry) снова теряет их и цитаты становятся
+            # невалидными относительно манифеста.
+            state["evidence"] = evidence
+            state["evidence_manifest"] = manifest
         warnings: list[str] = []
         if not manifest:
             # Structure-aware fallback: diff разделов — валидный ответ сам по
@@ -982,55 +1069,36 @@ class AgentService:
                 else self.answerer
             )
             kwargs: dict[str, Any] = {}
-            try:
-                parameters = inspect.signature(target).parameters.values()
-                supports_kwargs = any(
-                    item.kind == inspect.Parameter.VAR_KEYWORD for item in parameters
-                )
-                by_name = {item.name: item for item in parameters}
-                if supports_kwargs or (
-                    "repair" in by_name
-                    and by_name["repair"].kind
-                    != inspect.Parameter.POSITIONAL_ONLY
-                ):
-                    kwargs["repair"] = repair
-                if repair and diagnostics is not None and (
-                    supports_kwargs
-                    or (
-                        "diagnostics" in by_name
-                        and by_name["diagnostics"].kind
-                        != inspect.Parameter.POSITIONAL_ONLY
-                    )
-                ):
-                    kwargs["diagnostics"] = dict(diagnostics)
-                if supports_kwargs or (
-                    "history" in by_name
-                    and by_name["history"].kind != inspect.Parameter.POSITIONAL_ONLY
-                ):
-                    kwargs["history"] = [
-                        {"role": item["role"], "content": item["content"]}
-                        for item in state.get("history", [])
-                    ]
-                plan = state.get("query_plan") or QueryPlan()
-                for key, value in (
-                    ("answer_mode", plan.answer_mode),
-                    (
-                        "structural_changes",
-                        list(state.get("structural_changes", [])),
-                    ),
-                    (
-                        "section_matches",
-                        list(state.get("section_matches", [])),
-                    ),
-                    ("missing_years", list(state.get("missing_years", []))),
-                    ("coverage", state.get("coverage")),
-                ):
-                    if supports_kwargs or key in by_name:
-                        kwargs[key] = value
-            except (TypeError, ValueError):
-                # Старые/простые callable по-прежнему получают только исходные
-                # три позиционных аргумента.
-                pass
+            if supports_keyword(target, "repair"):
+                kwargs["repair"] = repair
+            if (
+                repair
+                and diagnostics is not None
+                and supports_keyword(target, "diagnostics")
+            ):
+                kwargs["diagnostics"] = dict(diagnostics)
+            if supports_keyword(target, "history"):
+                kwargs["history"] = [
+                    {"role": item["role"], "content": item["content"]}
+                    for item in state.get("history", [])
+                ]
+            plan = state.get("query_plan") or QueryPlan()
+            for key, value in (
+                ("answer_mode", plan.answer_mode),
+                ("metrics_reference", _metrics_reference(plan)),
+                (
+                    "structural_changes",
+                    list(state.get("structural_changes", [])),
+                ),
+                (
+                    "section_matches",
+                    list(state.get("section_matches", [])),
+                ),
+                ("missing_years", list(state.get("missing_years", []))),
+                ("coverage", state.get("coverage")),
+            ):
+                if supports_keyword(target, key):
+                    kwargs[key] = value
             answer = target(state["question"], evidence, manifest, **kwargs)
             # Генератор мог упаковать только часть evidence из-за бюджета;
             # фиксируем именно фактически упакованные chunk_id.
@@ -1039,12 +1107,14 @@ class AgentService:
 
         try:
             answer = _answer_from(generate(repair=False))
-        except Exception:
+        except Exception as exc:
+            _debug_generation_exception(exc)
             return Answer(
                 "abstain",
                 "Ответ не удалось безопасно сформировать.",
                 warnings=["generation_unavailable"],
             ), warnings
+        answer = self._fix_citation_quotes(answer, evidence)
         if not self._valid_answer(answer, manifest):
             warnings.append("citation_validation_retry")
             diagnostics = self._answer_repair_diagnostics(answer, manifest)
@@ -1180,8 +1250,11 @@ class AgentService:
                 STRUCTURAL_CLAIM_WARNING in answer.warnings
                 and not answer.facts
             )
+        # Таблицы из справочника значений могут не попасть в retrieval-манифест,
+        # но это реальные чанки корпуса: цитировать их допустимо.
+        allowed = manifest | _metrics_chunk_ids()
         for citation in answer.citations:
-            if not citation.chunk_id or citation.chunk_id not in manifest:
+            if not citation.chunk_id or citation.chunk_id not in allowed:
                 return False
             if citation.year is not None and (
                 isinstance(citation.year, bool) or not isinstance(citation.year, int)

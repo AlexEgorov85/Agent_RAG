@@ -15,7 +15,7 @@ sys.path.insert(0, str(PROJECT))
 from src.core.cache import cached_document_vectors
 from src.core.corpus import load_chunks
 from src.core.dense_index import DenseIndex
-from src.core.embeddings import CourseEmbeddings
+from src.core.embeddings import ReportEmbeddings, make_embeddings_client
 from src.engine.generator import AnswerGenerator
 from src.engine.rag_engine import RAGEngine
 from src.retrieval.bm25 import BM25Index
@@ -49,6 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     from openai import OpenAI
 
     client = OpenAI(api_key=api_key, base_url=base_url)
+    embed_client = make_embeddings_client(fallback_client=client)
     chunks = load_chunks(PROJECT / "data" / "dev" / "chunks")
     if args.doc:
         chunks = [chunk for chunk in chunks
@@ -60,8 +61,8 @@ def main(argv: list[str] | None = None) -> int:
           f"{sorted({chunk['doc_id'] for chunk in chunks})}")
 
     embed_model = os.getenv("EMBED_MODEL", "ai-sage/Giga-Embeddings-instruct-3B")
-    embeddings = CourseEmbeddings(
-        client, embed_model, os.getenv("EMBED_QUERY_PREFIX", "query:"))
+    embeddings = ReportEmbeddings(
+        embed_client, embed_model, os.getenv("EMBED_QUERY_PREFIX", "query:"))
     vectors = cached_document_vectors(
         chunks, embeddings, PROJECT / "data" / "dev" / "cache")
     dense = DenseIndex(chunks, vectors)

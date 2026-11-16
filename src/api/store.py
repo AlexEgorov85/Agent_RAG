@@ -11,7 +11,7 @@ import json
 import sqlite3
 import uuid
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from src.api.serialize import utc_now_iso
 
@@ -124,6 +124,7 @@ class Store:
         self.recover_interrupted()
 
     def ping(self) -> bool:
+        """Проверить доступность SQLite."""
         try:
             connection = self._connect()
             try:
@@ -180,6 +181,7 @@ class Store:
         title: str,
         research_id: str | None = None,
     ) -> dict[str, Any]:
+        """Создать исследование."""
         now = utc_now_iso()
         identifier = research_id or str(uuid.uuid4())
         connection = self._connect()
@@ -199,6 +201,7 @@ class Store:
     def get_research(
         self, owner_id: str, research_id: str
     ) -> dict[str, Any] | None:
+        """Исследование владельца по ID."""
         connection = self._connect()
         try:
             row = connection.execute(
@@ -217,6 +220,7 @@ class Store:
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
+        """Исследования владельца."""
         search = (query or "").strip()
         pattern = f"%{_casefold(search)}%"
         where = (
@@ -246,6 +250,7 @@ class Store:
     def update_research_title(
         self, owner_id: str, research_id: str, title: str
     ) -> dict[str, Any] | None:
+        """Переименовать исследование."""
         connection = self._connect()
         try:
             cursor = connection.execute(
@@ -260,6 +265,7 @@ class Store:
         return self.get_research(owner_id, research_id)
 
     def delete_research(self, owner_id: str, research_id: str) -> bool:
+        """Удалить исследование."""
         connection = self._connect()
         try:
             cursor = connection.execute(
@@ -272,6 +278,7 @@ class Store:
             connection.close()
 
     def touch_research(self, research_id: str) -> None:
+        """Обновить ``updated_at`` исследования."""
         connection = self._connect()
         try:
             connection.execute(
@@ -286,6 +293,7 @@ class Store:
     def find_client_message(
         self, owner_id: str, research_id: str, client_message_id: str
     ) -> dict[str, Any] | None:
+        """Найти сообщение по idempotency-ключу."""
         connection = self._connect()
         try:
             row = connection.execute(
@@ -414,6 +422,7 @@ class Store:
         return dict(row) if row is not None else None
 
     def mark_request_running(self, request_id: str) -> None:
+        """Перевести запрос в ``running``."""
         connection = self._connect()
         try:
             connection.execute(
@@ -428,6 +437,7 @@ class Store:
     def finish_request(
         self, request_id: str, status: str, *, error_code: str | None = None
     ) -> bool:
+        """Завершить запрос указанным статусом."""
         connection = self._connect()
         try:
             cursor = connection.execute(
@@ -442,6 +452,7 @@ class Store:
             connection.close()
 
     def request_status(self, request_id: str) -> str | None:
+        """Статус запроса."""
         connection = self._connect()
         try:
             row = connection.execute(
@@ -460,8 +471,8 @@ class Store:
         answer_json: str | None = None,
         filters_json: str | None = None,
         error_json: str | None = None,
-        clear_answer: bool = False,
     ) -> None:
+        """Обновить поля сообщения."""
         assignments: list[str] = []
         values: list[Any] = []
         for column, value in (
@@ -474,8 +485,6 @@ class Store:
             if value is not None:
                 assignments.append(f"{column} = ?")
                 values.append(value)
-        if clear_answer:
-            assignments.extend(["answer_json = NULL", "content = ''"])
         if not assignments:
             return
         values.append(message_id)
@@ -489,13 +498,9 @@ class Store:
         finally:
             connection.close()
 
-    def cancel_request(
-        self, request_id: str, *, message: str | None = None
-    ) -> bool:
+    def cancel_request(self, request_id: str) -> bool:
         """Пометить активный запрос и его сообщение как отменённые."""
         error = dict(_CANCELLED_ERROR)
-        if message:
-            error["message"] = message
         payload = json.dumps(error, ensure_ascii=False)
         now = utc_now_iso()
         connection = self._connect()
@@ -533,6 +538,7 @@ class Store:
 
     # ---------------------------------------------------------------- requests
     def get_request_internal(self, request_id: str) -> dict[str, Any] | None:
+        """Запрос без проверки владельца."""
         connection = self._connect()
         try:
             row = connection.execute(
@@ -565,38 +571,9 @@ class Store:
             connection.close()
         return dict(row) if row is not None else None
 
-    def request_for_message(
-        self, owner_id: str, assistant_message_id: str
-    ) -> dict[str, Any] | None:
-        connection = self._connect()
-        try:
-            row = connection.execute(
-                "SELECT q.* FROM requests q "
-                "JOIN researches r ON r.id = q.research_id "
-                "WHERE q.assistant_message_id = ? AND r.owner_id = ?",
-                (assistant_message_id, owner_id),
-            ).fetchone()
-        finally:
-            connection.close()
-        return dict(row) if row is not None else None
-
     # ---------------------------------------------------------------- messages
-    def get_message(
-        self, owner_id: str, message_id: str
-    ) -> dict[str, Any] | None:
-        connection = self._connect()
-        try:
-            row = connection.execute(
-                "SELECT m.* FROM messages m "
-                "JOIN researches r ON r.id = m.research_id "
-                "WHERE m.id = ? AND r.owner_id = ?",
-                (message_id, owner_id),
-            ).fetchone()
-        finally:
-            connection.close()
-        return dict(row) if row is not None else None
-
     def get_message_internal(self, message_id: str) -> dict[str, Any] | None:
+        """Сообщение без проверки владельца."""
         connection = self._connect()
         try:
             row = connection.execute(
@@ -614,6 +591,7 @@ class Store:
         limit: int = 50,
         before: str | None = None,
     ) -> list[dict[str, Any]] | None:
+        """Сообщения исследования владельца."""
         connection = self._connect()
         try:
             research = connection.execute(

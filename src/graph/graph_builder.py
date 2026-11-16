@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 import networkx as nx
+
+from src.core.io import atomic_write_json
+from src.core.record import field_value as _read
 
 from src.graph.graph_models import (
     ENTITY_TYPES,
@@ -23,15 +24,9 @@ from src.graph.graph_models import (
     RelationRecord,
     SectionGraphNode,
     entity_node_id,
+    normalize_entity_name,
     serialize_graph,
 )
-
-
-def _read(value: Any, name: str, default: Any = None) -> Any:
-    """Читает поле из dataclass ingestion-слоя или из словаря."""
-    if isinstance(value, Mapping):
-        return value.get(name, default)
-    return getattr(value, name, default)
 
 
 def _canonical(value: Any) -> Any:
@@ -345,8 +340,12 @@ def _resolve_relation_entity(
     entity_type: str,
     extraction_version: str | None,
 ) -> str:
-    """Переиспользует однозначно найденную сущность, если тип связи не задан."""
-    normalized = " ".join(name.split()).casefold()
+    """Переиспользует сущность с тем же именем/псевдонимом.
+
+    Сначала берётся единственная сущность с совпадающим ``entity_type``, затем
+    единственная по имени; при неоднозначности создаётся новая сущность.
+    """
+    normalized = normalize_entity_name(name)
     matching = [
         node_id for node_id, attrs in graph.nodes(data=True)
         if attrs.get("type") == "Entity"
@@ -365,11 +364,6 @@ def _resolve_relation_entity(
                        extraction_version=extraction_version)
 
 
-def graph_fingerprint(result: GraphBuildResult) -> str:
-    """Возвращает стабильный отпечаток содержимого результата сборки."""
-    return result.graph_fingerprint
-
-
 def graph_to_dict(result: GraphBuildResult) -> dict[str, Any]:
     """Возвращает детерминированное JSON-сериализуемое содержимое артефакта графа."""
     return serialize_graph(result.graph, result.graph_fingerprint, result.manifest)
@@ -383,30 +377,14 @@ def save_graph(result: GraphBuildResult, path: str | Path) -> Path:
     поэтому неудачная запись не оставляет частичный целевой файл.
     """
     target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path: Path | None = None
-    try:
-        descriptor, temporary_name = tempfile.mkstemp(
-            prefix=f".{target.name}.", suffix=".tmp", dir=target.parent,
-        )
-        temporary_path = Path(temporary_name)
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
-            json.dump(
-                graph_to_dict(result), handle, ensure_ascii=False, sort_keys=True,
-                indent=2,
-            )
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary_path, target)
-        temporary_path = None
-        return target
-    finally:
-        if temporary_path is not None:
-            try:
-                temporary_path.unlink()
-            except FileNotFoundError:
-                pass
+    atomic_write_json(
+        target,
+        graph_to_dict(result),
+        indent=2,
+        sort_keys=True,
+        trailing_newline=True,
+    )
+    return target
 
 
 def load_graph(path: str | Path) -> GraphBuildResult:

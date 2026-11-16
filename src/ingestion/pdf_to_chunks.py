@@ -1,23 +1,22 @@
-"""Чанкинг нормализованных элементов PDF в контракт чанка К2 (Занятие 2).
+"""Чанкинг нормализованных элементов PDF в контракт чанка К2.
 
-Модуль переносит курсовой контракт ``chunk_record``/``make_chunks`` на наш
+Модуль приводит контракт ``chunk_record``/``make_chunks`` к нашему
 ``RawElement``: тот же формат ``chunk_id``/``evidence_id``, сплиттер 800/100,
-«таблица = один чанк» с HTML. Дополнительно чанки обогащаются структурой
-(``chunk_enricher.py``), поэтому базовые поля К2 не меняются.
+«таблица = один чанк» с HTML. Обогащение структурой выполняет отдельный
+``chunk_enricher.py`` у вызывающего кода, базовые поля К2 не меняются.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import os
-import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
+from src.core.io import atomic_write_json
 from src.core.models import RawElement
 
-#: Курсовые обязательные поля чанка (Занятие 2) — НЕ МЕНЯЕМ.
+#: Обязательные поля чанка контракта К2 — НЕ МЕНЯЕМ.
 REQUIRED_CHUNK_FIELDS = {
     "chunk_id", "evidence_id", "doc_id", "title",
     "page_pdf", "page_label", "year", "report_period",
@@ -32,7 +31,7 @@ CHUNK_OVERLAP = 100
 
 def make_splitter(chunk_size: int = CHUNK_SIZE,
                   chunk_overlap: int = CHUNK_OVERLAP) -> Any:
-    """Создать курсовой ``RecursiveCharacterTextSplitter`` (800/100 по умолчанию).
+    """Создать ``RecursiveCharacterTextSplitter`` (800/100 по умолчанию).
 
     Args:
         chunk_size: Максимальная длина текстового чанка в символах.
@@ -60,7 +59,7 @@ def source_meta_from_pdf(pdf_path: Path) -> Dict[str, Any]:
 
     Returns:
         Словарь с ``doc_id``/``title``/``year``/``report_period``/``url``/
-        ``sha256`` (совместим с курсовым ``SOURCES``).
+        ``sha256`` (единый формат метаданных источника).
     """
     from src.ingestion.pdf_parser import compute_source_sha256, make_doc_id
 
@@ -82,7 +81,7 @@ def element_records(elements: Sequence[RawElement],
     """Превратить ``RawElement`` в записи-элементы контракта К2.
 
     Пропускаются ``Image``/``PageBreak`` и пустые элементы; таблица обязана
-    иметь текст (HTML без текста — ошибка корпуса, как в курсе).
+    иметь текст (HTML без текста — ошибка корпуса).
 
     Args:
         elements: Нормализованные элементы документа (в порядке следования).
@@ -140,7 +139,7 @@ def chunk_record(records: Sequence[Mapping[str, Any]], text: str, kind: str,
         part_number: Порядковый номер части внутри страницы.
 
     Returns:
-        Словарь чанка с курсовыми полями (``chunk_id`` c sha256-диджестом).
+        Словарь чанка с полями контракта К2 (``chunk_id`` c sha256-диджестом).
     """
     first = records[0]
     metadata_keys = [
@@ -261,15 +260,6 @@ def save_chunks(chunks: Sequence[Mapping[str, Any]], doc_id: str,
         Путь к записанному файлу.
     """
     chunks_dir = Path(chunks_dir)
-    chunks_dir.mkdir(parents=True, exist_ok=True)
     target = chunks_dir / f"{doc_id}_chunks.json"
-    handle = tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", suffix=".json",
-        dir=chunks_dir, delete=False)
-    try:
-        json.dump(list(chunks), handle, ensure_ascii=False, indent=1)
-        handle.flush()
-    finally:
-        handle.close()
-    os.replace(handle.name, target)
+    atomic_write_json(target, list(chunks), indent=1)
     return target

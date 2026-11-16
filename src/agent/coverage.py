@@ -15,6 +15,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from src.core.record import chunk_text as _chunk_text
+from src.core.record import field_value as _chunk_field
+from src.core.record import to_year as _year
+
 CoverageStatus = Literal["covered", "not_found", "year_absent"]
 ReportStatus = Literal["not_required", "complete", "partial", "insufficient"]
 
@@ -151,19 +155,8 @@ def extract_metrics(text: str) -> list[str]:
 
 
 def metric_label(metric: str) -> str:
+    """Человекочитаемая подпись канонической метрики."""
     return METRIC_LABELS.get(metric, metric)
-
-
-def _chunk_text(chunk: Any) -> str:
-    if isinstance(chunk, dict):
-        return f"{chunk.get('text', '')} {chunk.get('html', '')}"
-    return f"{getattr(chunk, 'text', '')} {getattr(chunk, 'html', '')}"
-
-
-def _chunk_field(chunk: Any, name: str) -> Any:
-    if isinstance(chunk, dict):
-        return chunk.get(name)
-    return getattr(chunk, name, None)
 
 
 def chunk_matches_metric(chunk: Any, metric: str) -> bool:
@@ -183,12 +176,14 @@ def chunk_matches_metric(chunk: Any, metric: str) -> bool:
 
 @dataclass(frozen=True)
 class CoverageCell:
+    """Одна ячейка матрицы «метрика × год»."""
     metric: str
     year: int | None
     status: CoverageStatus
     chunk_ids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
+        """JSON-представление ячейки."""
         return {
             "metric": self.metric,
             "metric_label": metric_label(self.metric),
@@ -212,6 +207,7 @@ def _aggregate_status(statuses: list[str]) -> str:
 
 @dataclass(frozen=True)
 class CoverageReport:
+    """Матрица покрытия метрик по годам с итоговым статусом."""
     status: ReportStatus
     expected_years: list[int]
     covered_years: list[int]
@@ -229,21 +225,24 @@ class CoverageReport:
 
     @property
     def uncovered_years(self) -> list[int]:
+        """Годы из ``expected_years``, не покрытые evidence."""
         return sorted(set(self.expected_years) - set(self.covered_years))
 
     def is_year_absent(self, year: int) -> bool:
+        """Есть ли ячейка ``year_absent`` за указанный год."""
         return any(
             cell.year == year and cell.status == "year_absent"
             for cell in self.cells
         )
 
     def missing_cells(self) -> list[CoverageCell]:
-        """Ячейки, по которым ещё нужен адресный поиск."""
+        """Ячейки со статусом, отличным от ``covered`` (включая ``year_absent``)."""
         return [
             cell for cell in self.cells if cell.status != "covered"
         ]
 
     def is_covered(self, metric: str, year: int) -> bool:
+        """Покрыта ли метрика за указанный год."""
         return any(
             cell.metric == metric
             and cell.year == year
@@ -251,26 +250,8 @@ class CoverageReport:
             for cell in self.cells
         )
 
-    def has_actionable_gaps(self) -> bool:
-        """Есть ли пробел, который можно закрыть ещё одним поиском.
-
-        ``year_absent`` — ограничение корпуса, его повторно не ищем.
-        """
-        for cell in self.missing_cells():
-            if cell.status == "year_absent":
-                continue
-            if cell.metric:
-                if cell.year is not None:
-                    return True
-                continue
-            if cell.year is not None:
-                return True
-        for year in self.uncovered_years:
-            if not self.is_year_absent(year):
-                return True
-        return False
-
     def to_dict(self) -> dict[str, Any]:
+        """JSON-представление отчёта покрытия."""
         return {
             "status": self.status,
             "expected_years": list(self.expected_years),
@@ -291,17 +272,6 @@ class CoverageReport:
             "distinct_sections": self.distinct_sections,
             "notes": list(self.notes),
         }
-
-
-def _year(value: Any) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
 
 
 def _evidence_years(evidence: dict[str, Any]) -> list[int]:

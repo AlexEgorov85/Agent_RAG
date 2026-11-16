@@ -1,8 +1,9 @@
 """Генератор ответов для OpenAI-совместимого API со строгой проверкой цитат.
 
 Генератор можно внедрить в ``AgentService`` как ``Answerer`` или использовать
-в ``RAGEngine``. Сбои провайдера, невалидный JSON и нарушения схемы по умолчанию
-повторяются один раз, после чего превращаются в безопасный ответ ``abstain``.
+в ``RAGEngine``. Сбои провайдера, невалидный JSON и нарушения схемы повторяются
+до ``max_retries`` дополнительных раз (по умолчанию 2), после чего превращаются
+в безопасный ответ ``abstain``.
 Сырой текст провайдера никогда не попадает в предупреждения или ответ.
 """
 
@@ -163,6 +164,78 @@ def _source_text(evidence: Mapping[str, Any], chunk_id: str) -> str:
     return f"{source.get('text') or ''} {source.get('html') or ''}"
 
 
+def _store_debug_payload(
+    messages: Sequence[Mapping[str, Any]],
+    response: Any,
+    error: BaseException,
+) -> None:
+    """Сохранить неудачный обмен с провайдером при ``RAG_DEBUG_GENERATION=1``.
+
+    Нужен, чтобы разбирать ``abstain`` из-за схемы ответа, не включая отладочные
+    принты в обычный путь. Файл перезаписывается: хранится последний случай.
+    """
+    import os
+    from pathlib import Path
+
+    if os.getenv("RAG_DEBUG_GENERATION") != "1":
+        return
+    try:
+        content = _response_content(response)
+    except Exception:  # noqa: BLE001 - диагностика не должна падать
+        content = None
+    payload = {
+        "error": f"{type(error).__name__}: {error}",
+        "messages": [dict(message) for message in messages],
+        "content": content,
+    }
+    target = Path("logs") / "generation_debug.json"
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+    except OSError:
+        pass
+
+
+def _verifiable_page(value: Any) -> int | None:
+    """page_pdf только с положительным номером: 0 — отсутствие страницы."""
+    page = _optional_int(value)
+    return page if page is not None and page >= 1 else None
+
+
+def _verbatim_quote(quote: str | None, source_text: str) -> str | None:
+    """Дословный фрагмент источника вместо пересказа модели.
+
+    Модель часто перефразирует ``quote``, и проверка «цитата есть в чанке»
+    падает. Здесь цитата либо находится в тексте как есть, либо строится как
+    окно вокруг первого числа из неё — тоже дословно.
+    """
+    if not quote or not source_text:
+        return None
+    normalized_quote = " ".join(quote.split())
+    if not normalized_quote:
+        return None
+    pattern = re.compile(
+        r"\s+".join(re.escape(part) for part in normalized_quote.split()),
+        re.IGNORECASE,
+    )
+    match = pattern.search(source_text)
+    if match is not None:
+        return source_text[match.start():match.end()]
+    for raw in re.findall(r"\d[\d\s\u00a0]{0,12}[.,]?\d*", normalized_quote):
+        needle = raw.strip()
+        if not needle:
+            continue
+        position = source_text.find(needle)
+        if position < 0:
+            continue
+        start = max(0, position - 120)
+        end = min(len(source_text), position + len(needle) + 160)
+        return source_text[start:end].strip()
+    return None
+
+
 def _safe_warnings(values: Sequence[Any]) -> list[str]:
     warnings: list[str] = []
     for value in values:
@@ -263,6 +336,7 @@ class AnswerGenerator:
         section_matches: Sequence[Mapping[str, Any]] | None = None,
         missing_years: Sequence[int] | None = None,
         coverage: Any = None,
+        metrics_reference: Sequence[Mapping[str, Any]] | None = None,
     ) -> Answer:
         """Возвращает проверенный ответ или безопасный abstain; текст провайдера не всплывает."""
         if not isinstance(question, str):
@@ -331,6 +405,11 @@ class AnswerGenerator:
                 analysis_context["coverage"] = to_dict()
             elif isinstance(coverage, Mapping):
                 analysis_context["coverage"] = dict(coverage)
+        if metrics_reference:
+            analysis_context["metrics_reference"] = [
+                dict(item) for item in metrics_reference[:20]
+                if isinstance(item, Mapping)
+            ]
 
         user_prompt = build_user_prompt(
             question,
@@ -361,6 +440,7 @@ class AnswerGenerator:
         create = getattr(completions, "create", completions)
         for attempt in range(self.max_retries + 1):
             attempt_messages = messages
+            response: Any = None
             if attempt > 0 and not repair:
                 attempt_messages = [
                     {"role": "system", "content": SYSTEM_PROMPT},
@@ -381,8 +461,9 @@ class AnswerGenerator:
                     manifest,
                     allow_uncited_structural=structural_available,
                 )
-            except Exception:
+            except Exception as exc:
                 # Намеренно не сохраняем и не показываем текст провайдера/исключения.
+                _store_debug_payload(attempt_messages, response, exc)
                 continue
         return Answer(
             "abstain",
@@ -397,15 +478,16 @@ class AnswerGenerator:
         evidence: Mapping[str, Mapping[str, Any]],
     ) -> Citation:
         source = evidence.get(chunk_id, {})
+        source_text = _source_text(evidence, chunk_id)
         return Citation(
             chunk_id=chunk_id,
             doc_id=_optional_str(source.get("doc_id")),
             year=_optional_int(source.get("year")),
             issuer=_optional_str(source.get("issuer")),
-            page_pdf=_optional_int(source.get("page_pdf")),
+            page_pdf=_verifiable_page(source.get("page_pdf")),
             page_label=_optional_str(source.get("page_label")),
             section_path=_optional_str(source.get("section_path")),
-            quote=quote or None,
+            quote=_verbatim_quote(quote, source_text) or (quote or None),
         )
 
     @classmethod

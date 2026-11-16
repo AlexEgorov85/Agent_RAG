@@ -1,1 +1,1 @@
-"""Пакет `src` — дополнительный structure-aware код проекта (не курсовой)."""
+"""Пакет ``src`` — structure-aware код проекта: ingestion, retrieval, генерация и агент."""

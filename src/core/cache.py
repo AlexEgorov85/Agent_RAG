@@ -120,22 +120,61 @@ def cached_document_vectors(chunks: Sequence[Mapping[str, Any]],
             # заменяется только после полностью успешной пересборки.
             pass
 
-    vectors: list[list[float]] = []
+    # Частичный кэш позволяет продолжить после 429/обрыва сети, не считая
+    # тысячи уже готовых векторов заново. Путь привязан к fingerprint.
+    partial = target.with_suffix(target.suffix + ".partial.jsonl")
+    known: dict[str, list[float]] = {}
+    if partial.is_file():
+        try:
+            lines = partial.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            lines = []
+        dimension: int | None = None
+        for line in lines:
+            try:
+                item = json.loads(line)
+                chunk_id = str(item["chunk_id"])
+                vector = _validate_vectors([item["vector"]], 1)[0]
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if dimension is None:
+                dimension = len(vector)
+            if len(vector) == dimension:
+                known[chunk_id] = vector
+
+    vectors: list[list[float] | None] = [
+        known.get(chunk_id) for chunk_id in chunk_ids
+    ]
+    missing = [index for index, vector in enumerate(vectors) if vector is None]
     temporary = target.with_suffix(target.suffix + ".tmp")
     try:
-        for start in range(0, len(chunks), batch_size):
-            batch = chunks[start:start + batch_size]
-            result = embeddings.embed_documents([str(chunk.get("text", ""))
-                                                 for chunk in batch])
-            vectors.extend(_validate_vectors(result, len(batch)))
+        for start in range(0, len(missing), batch_size):
+            indices = missing[start:start + batch_size]
+            batch = [chunks[index] for index in indices]
+            result = embeddings.embed_documents(
+                [str(chunk.get("text", "")) for chunk in batch]
+            )
+            embedded = _validate_vectors(result, len(batch))
+            for index, chunk, vector in zip(indices, batch, embedded, strict=True):
+                vectors[index] = vector
+                with partial.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps({
+                        "chunk_id": _chunk_id(chunk),
+                        "vector": vector,
+                    }, ensure_ascii=False) + "\n")
+        if any(vector is None for vector in vectors):
+            raise ValueError("embedding cache is incomplete")
+        complete = [vector for vector in vectors if vector is not None]
         payload = {"fingerprint": fingerprint, "model": model,
-                   "chunk_ids": chunk_ids, "vectors": vectors}
+                   "chunk_ids": chunk_ids, "vectors": complete}
         target.parent.mkdir(parents=True, exist_ok=True)
         temporary.write_text(json.dumps(payload, ensure_ascii=False),
                              encoding="utf-8")
         temporary.replace(target)
+        if partial.exists():
+            partial.unlink()
         return {chunk_id: vector for chunk_id, vector in
-                zip(chunk_ids, vectors, strict=True)}
+                zip(chunk_ids, complete, strict=True)}
     finally:
         if temporary.exists():
             temporary.unlink()

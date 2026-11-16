@@ -25,6 +25,7 @@ def health(
     store: Store = Depends(get_store),
     services: Services = Depends(get_services),
 ) -> HealthResponse:
+    """Проверка живости API и backend'а."""
     database_ok = store.ping()
     agent_available = False
     corpus_available = False
@@ -53,6 +54,7 @@ def capabilities(
     owner: Owner,
     services: Services = Depends(get_services),
 ) -> CapabilitiesResponse:
+    """Возможности API для UI."""
     return CapabilitiesResponse(**services.capabilities())
 
 
@@ -61,4 +63,5 @@ def corpus(
     owner: Owner,
     services: Services = Depends(get_services),
 ) -> CorpusResponse:
+    """Описание загруженного корпуса."""
     return CorpusResponse(**services.corpus.to_public())

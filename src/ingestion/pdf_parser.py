@@ -21,6 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from src.core.io import atomic_write_json
 from src.core.models import ParseResult, RawElement
 from src.core.config import ParserSettings, load_parser_settings
 
@@ -96,10 +97,10 @@ def count_pdf_pages(pdf_path: Path) -> int:
 
 
 def page_labels_of(pdf_path: Path) -> List[str]:
-    """Метка страницы с печати, как на заданных им стр. в PDF (переиспользовано из курса).
+    """Метка страницы с печати, как на страницах PDF.
 
-    Курсовой код (Занятие 2, ``page_element_records``) хранит у чанка ``page_label``
-    из ``PdfReader.page_labels`` — она нужна фильтрам поиска по «напечатанной» странице.
+    Чанк хранит ``page_label`` из ``PdfReader.page_labels`` — она нужна
+    фильтрам поиска по «напечатанной» странице.
     Если метки нет или их число не совпадает с числом страниц — пустой список.
     """
     from pypdf import PdfReader
@@ -130,8 +131,8 @@ def preflight_check_ocr(
             распознаётся tesseract'ом сам).
 
     Returns:
-        Эквивалентный ``TESSDATA_PREFIX`` (путь к tessdata), если задан явно
-        и найдены все языковые файлы; иначе None.
+        Эквивалентный ``TESSDATA_PREFIX``, если каталог задан явно или через
+        env и найдены все языковые файлы; иначе None.
 
     Raises:
         ParserEnvironmentError: tesseract не найден или отсутствует traineddata.
@@ -278,7 +279,7 @@ def make_raw_element(
         doc_id: Идентификатор документа.
         index: Порядковый индекс по документу (для стабильного element_id).
         min_image_area: Минимальная площадь картинки для сохранения base64.
-        page_label: Метка страницы с печати (контракт чанка курса, Занятие 2).
+        page_label: Метка страницы с печати (поле контракта чанка).
 
     Returns:
         Нормализованный элемент.
@@ -287,7 +288,7 @@ def make_raw_element(
 
     meta = getattr(element, "metadata", None)
     coords = getattr(meta, "coordinates", None)
-    # Номер исходной страницы: course-протокол (Занятие 2) хранит его в
+    # Номер исходной страницы: контракт чанка хранит его в
     # metadata.page_number; coordinates (bounding box) заполняется только при
     # layout-анализе и может отсутствовать вовсе (strategy="fast").
     page_number = getattr(meta, "page_number", None)
@@ -374,15 +375,6 @@ def _silence_pdfminer_noise() -> None:
 # Сериализация артефактов (задача 4.1)
 # ---------------------------------------------------------------------------
 
-def _atomic_write_json(path: Path, payload: Any) -> None:
-    """Атомарная запись JSON: сначала во tmp-файл, затем rename на целевой путь."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, ensure_ascii=False)
-    tmp.replace(path)
-
-
 def save_artifacts(doc_id: str, result: ParseResult,
                    elements_dir: Path) -> Tuple[Path, Path]:
     """Сохранить артефакты ``{doc_id}_elements.json`` и ``{doc_id}_stats.json``.
@@ -397,8 +389,8 @@ def save_artifacts(doc_id: str, result: ParseResult,
     """
     elements_json = elements_dir / f"{doc_id}_elements.json"
     stats_json = elements_dir / f"{doc_id}_stats.json"
-    _atomic_write_json(elements_json, [el.to_dict() for el in result.elements])
-    _atomic_write_json(stats_json, result.stats)
+    atomic_write_json(elements_json, [el.to_dict() for el in result.elements])
+    atomic_write_json(stats_json, result.stats)
     return elements_json, stats_json
 
 
@@ -459,7 +451,7 @@ def _move_to_backup(elements_dir: Path, doc_id: str) -> Optional[Tuple[Path, Pat
 def build_page_slice(pdf_path: Path, start: int, end: int) -> "io.BytesIO":
     """Вырезать интервал страниц [start..end] (1-based) в свежий буфер BytesIO.
 
-    Курсовой протокол Занятия 2 вместо ``partition_pdf(pages=...)``:
+    Протокол батчей вместо ``partition_pdf(pages=...)``:
     в unstructured 0.27.36 параметр ``pages`` отсутствует в сигнатуре и молча
     игнорируется (уходит в ``**kwargs`` — парсится весь документ). Вырезка через
     pypdf ``PdfWriter`` + ``starting_page_number`` в ``_parse_batch`` гарантирует
@@ -539,11 +531,11 @@ def _convert_batch(
     page_labels: List[str],
     min_image_area: int,
 ) -> List[RawElement]:
-    """Сконвертировать батч элементов с валидацией страниц (переиспользовано из курса).
+    """Сконвертировать батч элементов с валидацией страниц.
 
-    Курсовая ``page_element_records`` (Занятие 2) роняет парс с сообщением
-    «Элемент потерял номер исходной страницы», если метаданные элемента
-    разошлись с ожидаемой страницей. Здесь та же проверка на интервал батча.
+    Парс падает с сообщением «Элемент потерял номер исходной страницы», если
+    метаданные элемента разошлись с ожидаемой страницей. Здесь та же проверка
+    на интервал батча.
     """
     start, end = page_range
     converted: List[RawElement] = []
@@ -695,7 +687,8 @@ def parse_all(raw_dir: Path, *, settings: Optional[ParserSettings] = None,
         force: Перепарсить все файлы, даже актуальные (старые — в backup).
 
     Returns:
-        Список результатов по реально спарсенным файлам (пропущенные — None).
+        Список результатов по реально спарсенным файлам; пропущенные и упавшие
+        файлы в список не входят.
     """
     settings = settings or load_parser_settings()
     pdfs = sorted(Path(raw_dir).glob("*.pdf"))
@@ -880,12 +873,10 @@ def preview_pdf(
     return by_type
 
 
-def format_stats_table(pdfs: Optional[List[Path]] = None,
-                       settings: Optional[ParserSettings] = None) -> str:
+def format_stats_table(settings: Optional[ParserSettings] = None) -> str:
     """Свободная сводная таблица по спарсенным артефактам (режим CLI --stats).
 
     Args:
-        pdfs: Отфильтровать до этих файлов; None — все артефакты каталога.
         settings: Конфигурация; None -> ``load_parser_settings()``.
 
     Returns:

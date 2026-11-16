@@ -27,7 +27,7 @@ from src.core.corpus import enrich_chunks_with_registry, load_chunks
 from src.core.credentials import get_credentials
 from src.core.source_registry import DEFAULT_REGISTRY_PATH, load_registry
 from src.core.dense_index import DenseIndex
-from src.core.embeddings import CourseEmbeddings
+from src.core.embeddings import ReportEmbeddings, make_embeddings_client
 from src.core.faiss_index import FaissDenseIndex, FaissIndexError
 from src.core.rag_config import RAGSettings, load_rag_settings
 from src.engine.generator import AnswerGenerator
@@ -37,7 +37,7 @@ from src.retrieval.hybrid_retriever import HybridRetriever
 from src.retrieval.rewrite import QueryRewriter
 from src.retrieval.temporal_search import PerYearSearch
 
-#: Префикс запроса, совместимый с уже собранным кэшем курсового dev-корпуса.
+#: Префикс запроса, совместимый с уже собранным кэшем dev-корпуса.
 DEFAULT_QUERY_PREFIX = "query:"
 
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
@@ -265,7 +265,7 @@ def _load_source_registry(path: Path):
 
 
 def _index_target(
-    embeddings: CourseEmbeddings,
+    embeddings: ReportEmbeddings,
     chunks: list[dict[str, Any]],
     *,
     settings: RAGSettings,
@@ -289,7 +289,7 @@ def _index_target(
 
 def _load_dense_index(
     chunks: list[dict[str, Any]],
-    embeddings: CourseEmbeddings,
+    embeddings: ReportEmbeddings,
     *,
     settings: RAGSettings,
     indexes_dir: Path | str | None,
@@ -323,7 +323,7 @@ def _load_dense_index(
 def _build_dense_index(
     chunks: list[dict[str, Any]],
     vectors: Mapping[str, list[float]],
-    embeddings: CourseEmbeddings,
+    embeddings: ReportEmbeddings,
     *,
     settings: RAGSettings,
     target: Path,
@@ -358,6 +358,7 @@ def create_agent_service(
     indexes_dir: Path | str | None = None,
     source_registry_path: Path | str | None = None,
     client: Any = None,
+    embedding_client: Any = None,
     use_reranker: bool | None = None,
     settings: RAGSettings | None = None,
 ) -> AgentService:
@@ -375,6 +376,8 @@ def create_agent_service(
         source_registry_path: Реестр источников для ``issuer``/``country`` чанков.
             ``None`` — env ``SOURCE_REGISTRY_PATH`` или ``data/source_registry.json``.
         client: Готовый OpenAI-совместимый клиент (для тестов/smoke).
+        embedding_client: Отдельный клиент эмбеддингов; ``None`` — из
+            ``EMBED_BASE_URL``/``EMBED_API_KEY`` или общий ``client``.
         use_reranker: Включить LLM-реранкер. ``None`` — из env ``RERANK_ENABLED``
             (по умолчанию включён; ``0`` отключает).
         settings: Готовая конфигурация (для тестов).
@@ -418,9 +421,19 @@ def create_agent_service(
             timeout=90,
             max_retries=2,
         )
+        if embedding_client is None:
+            embedding_client = make_embeddings_client(
+                getattr(settings, "embed_base_url", ""),
+                getattr(settings, "embed_api_key", ""),
+                fallback_client=client,
+            )
+    elif embedding_client is None:
+        # Явно переданный клиент — инъекция для тестов; используем его и для
+        # эмбеддингов, не собирая отдельный провайдер.
+        embedding_client = client
 
-    embeddings = CourseEmbeddings(
-        client,
+    embeddings = ReportEmbeddings(
+        embedding_client,
         settings.embeddings_model,
         os.getenv("EMBED_QUERY_PREFIX", DEFAULT_QUERY_PREFIX),
     )

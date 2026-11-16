@@ -79,6 +79,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Повторы на пакет при некорректном JSON")
     parser.add_argument("--workers", type=int, default=1,
                         help="Параллельных запросов к LLM (1–8; по умолчанию 1)")
+    parser.add_argument("--max-batches", type=int, default=None,
+                        help="Сколько пакетов обработать за этот запуск")
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT,
                         help="JSONL-чекпоинт успешных пакетов (по умолчанию "
                              "data/graph/.extraction_checkpoint.jsonl)")
@@ -100,8 +102,8 @@ def _validate_args(parser: argparse.ArgumentParser,
         parser.error("--limit-per-doc должен быть >= 1")
     if args.chunks_per_call < 1:
         parser.error("--chunks-per-call должен быть >= 1")
-    if not 1 <= args.workers <= 8:
-        parser.error("--workers должен быть от 1 до 8")
+    if not 1 <= args.workers <= 32:
+        parser.error("--workers должен быть от 1 до 32")
 
 
 def _load_structures(doc_ids: set[str], structure_dir: Path) -> dict[str, Any]:
@@ -211,6 +213,27 @@ def _load_checkpoint(
     return records
 
 
+def _covered_chunk_ids(records: dict[str, dict[str, Any]]) -> set[str]:
+    """Чанки, уже обработанные в чекпоинте.
+
+    Новые записи хранят список ``chunk_ids`` пакета целиком. В старых записях
+    его нет, поэтому покрытие восстанавливается по ``chunk_id`` сущностей и
+    списку ``skipped``; чанки без единой сущности просто попадут в повторную
+    обработку, потерь нет.
+    """
+    covered: set[str] = set()
+    for item in records.values():
+        for chunk_id in item.get("chunk_ids") or []:
+            covered.add(str(chunk_id))
+        for entity in item.get("entities") or []:
+            chunk_id = entity.get("chunk_id")
+            if chunk_id:
+                covered.add(str(chunk_id))
+        for chunk_id in item.get("skipped") or []:
+            covered.add(str(chunk_id))
+    return covered
+
+
 def _append_checkpoint(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
@@ -227,6 +250,7 @@ def _extract_parallel(
     chunks_per_call: int,
     workers: int,
     checkpoint_path: Path | None = None,
+    max_batches: int | None = None,
 ) -> ExtractionResult:
     """Извлекает сущности пакетами параллельно и детерминированно склеивает.
 
@@ -234,10 +258,7 @@ def _extract_parallel(
     что использует ``LLMEntityExtractor`` (сущность + chunk_id; отношение +
     evidence), поэтому порядок завершения потоков не влияет на граф.
     """
-    batches = [
-        chunks[start:start + chunks_per_call]
-        for start in range(0, len(chunks), chunks_per_call)
-    ]
+    batches: list[list[dict[str, Any]]] = []
     entities: dict[tuple[str, str, str], Any] = {}
     relations: dict[tuple[Any, ...], Any] = {}
     failed: list[str] = []
@@ -294,6 +315,21 @@ def _extract_parallel(
         )
     done = len(done_keys)
 
+    covered = _covered_chunk_ids(saved)
+    todo_chunks = [
+        chunk for chunk in chunks
+        if str(chunk.get("chunk_id")) not in covered
+    ]
+    batches = [
+        todo_chunks[start:start + chunks_per_call]
+        for start in range(0, len(todo_chunks), chunks_per_call)
+    ]
+    print(
+        f"[graph] чанков: {len(chunks)}, из checkpoint {len(chunks) - len(todo_chunks)}, "
+        f"к обработке {len(todo_chunks)} в {len(batches)} пакетах",
+        flush=True,
+    )
+
     def extract_batch(batch: list[dict[str, Any]]) -> ExtractionResult:
         extractor = LLMEntityExtractor(
             client,
@@ -304,17 +340,21 @@ def _extract_parallel(
         return extractor.extract(batch)
 
     pending = [batch for batch in batches if _batch_key(batch) not in done_keys]
-    if done:
+    if max_batches is not None:
+        pending = pending[:max(0, max_batches)]
+        print(f"[graph] бюджет окна: {len(pending)} пакетов", flush=True)
+    if done_keys:
         print(
-            f"[graph] resume: {done} пакетов из checkpoint, "
-            f"осталось {len(pending)}",
+            f"[graph] resume: {len(done_keys)} пакетов из checkpoint, "
+            f"к отправке {len(pending)}",
             flush=True,
         )
+    processed = 0
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(extract_batch, batch): batch for batch in pending}
         for future in as_completed(futures):
             batch = futures[future]
-            done += 1
+            processed += 1
             try:
                 result = future.result()
             except Exception:  # noqa: BLE001 - один пакет не должен рушить весь граф
@@ -331,6 +371,9 @@ def _extract_parallel(
                         {
                             "batch": _batch_key(batch),
                             "model": model,
+                            "chunk_ids": [
+                                str(chunk.get("chunk_id")) for chunk in batch
+                            ],
                             "entities": [
                                 asdict(record) for record in result.entities
                             ],
@@ -341,9 +384,9 @@ def _extract_parallel(
                             "calls": result.calls,
                         },
                     )
-            if done % 10 == 0 or done == len(batches):
+            if processed % 10 == 0 or processed == len(pending):
                 print(
-                    f"[graph] пакетов {done}/{len(batches)} | calls {calls} | "
+                    f"[graph] пакетов {processed}/{len(pending)} | calls {calls} | "
                     f"failed {len(set(failed))}",
                     flush=True,
                 )
@@ -432,6 +475,7 @@ def main(argv: list[str] | None = None) -> int:
         chunks_per_call=args.chunks_per_call,
         workers=args.workers,
         checkpoint_path=None if args.no_checkpoint else args.checkpoint,
+        max_batches=args.max_batches,
     )
 
     result = build_graph(

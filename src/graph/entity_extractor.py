@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -23,6 +24,7 @@ from src.graph.graph_models import (
     ENTITY_TYPES,
     EntityRecord,
     RelationRecord,
+    normalize_entity_name,
 )
 
 #: Описательные идентификаторы для манифестов графа и записей сущностей.
@@ -33,7 +35,10 @@ ENTITY_RECORD_SOURCE = "llm_entity_extractor"
 
 #: Ограничивает текст, отправляемый провайдеру на один чанк.
 MAX_CHUNK_TEXT_CHARS = 4_000
-MAX_COMPLETION_TOKENS = 4_096
+#: Лимит вывода на один запрос. Крупные пакеты (10–12 чанков) не влезают в
+#: 4096 токенов: JSON обрезается и пакет уходит в failed, поэтому значение
+#: можно поднять через ``GRAPH_MAX_COMPLETION_TOKENS``.
+MAX_COMPLETION_TOKENS = int(os.environ.get("GRAPH_MAX_COMPLETION_TOKENS", "4096"))
 
 #: Визуальные описания не входят в MVP-контракт извлечения.
 _SKIPPED_CHUNK_KINDS = frozenset({"chart", "figure", "image", "visual"})
@@ -58,11 +63,6 @@ class ExtractionResult:
     calls: int
 
 
-def normalize_entity_name(name: str) -> str:
-    """Схлопывает пробелы и приводит имя к нижнему регистру для стабильной идентичности."""
-    return " ".join(str(name).split()).casefold()
-
-
 #: Перед проверкой упоминаний удаляем всё, кроме букв/цифр, чтобы совпадали
 #: артефакты OCR/переносов вроде ``Сбер-\nПрайм``.
 _NON_ALNUM = re.compile(r"[^0-9a-zа-яё]+")
@@ -74,7 +74,7 @@ def _mention_key(value: Any) -> str:
 
 
 def _mentions(name: Any, text: Any) -> bool:
-    """Возвращает ``True``, если ``name`` буквально встречается в ``text``."""
+    """``True``, если нормализованное имя (без пунктуации, ≥3 символов) входит в нормализованный текст."""
     key = _mention_key(name)
     return len(key) >= 3 and key in _mention_key(text)
 

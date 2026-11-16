@@ -1,4 +1,4 @@
-"""Адаптер эмбеддингов курса для OpenAI-совместимого API Cloud.ru.
+"""Адаптер эмбеддингов для OpenAI-совместимого API Cloud.ru.
 
 Префикс поиска получает только запрос, документы встраиваются как есть.
 Адаптер переупорядочивает ответ по индексам и отбраковывает битые векторы,
@@ -8,8 +8,45 @@
 from __future__ import annotations
 
 import math
+import os
 from collections.abc import Mapping, Sequence
 from typing import Any
+
+
+def make_embeddings_client(
+    base_url: str | None = None,
+    api_key: str | None = None,
+    *,
+    fallback_client: Any = None,
+) -> Any:
+    """Вернуть OpenAI-клиент для эмбеддингов.
+
+    Если задан отдельный провайдер (``EMBED_BASE_URL``/``EMBED_API_KEY``),
+    создаётся собственный клиент, а LLM остаётся на ``LLM_BASE_URL``. Без
+    отдельного провайдера используется ``fallback_client`` или LLM-настройки.
+    """
+    base = (base_url or os.getenv("EMBED_BASE_URL")
+            or os.getenv("EMBEDDINGS_BASE_URL") or "").strip()
+    key = (api_key or os.getenv("EMBED_API_KEY")
+           or os.getenv("NEURALDEEP_API_KEY") or "").strip()
+    if not base and not key:
+        if fallback_client is not None:
+            return fallback_client
+        base = (os.getenv("LLM_BASE_URL") or "").strip()
+        key = (os.getenv("LLM_API_KEY") or "").strip()
+        if not base or not key:
+            raise RuntimeError(
+                "Не заданы EMBED_BASE_URL/EMBED_API_KEY (или LLM_BASE_URL/"
+                "LLM_API_KEY). Добавьте их в .env.")
+    if not base:
+        raise RuntimeError(
+            "Не задан EMBED_BASE_URL для отдельного провайдера эмбеддингов.")
+    if not key:
+        raise RuntimeError(
+            "Не задан EMBED_API_KEY для отдельного провайдера эмбеддингов.")
+    from openai import OpenAI
+
+    return OpenAI(api_key=key, base_url=base, timeout=90, max_retries=2)
 
 
 def _response_data(response: Any) -> list[Any]:
@@ -25,7 +62,7 @@ def _item_field(item: Any, key: str, default: Any = None) -> Any:
     return getattr(item, key, default)
 
 
-class CourseEmbeddings:
+class ReportEmbeddings:
     """Встраивает документы без префикса, а запросы — с префиксом поиска."""
 
     def __init__(self, client: Any, model: str, query_prefix: str = "query:") -> None:
@@ -84,14 +121,3 @@ class CourseEmbeddings:
             raise TypeError("query must be a string")
         vectors = self._embed([self.query_prefix + text])
         return vectors[0]
-
-
-def normalize(vector: Sequence[float]) -> list[float]:
-    """Приводит вектор к единичной длине; нулевой вектор остаётся нулевым."""
-    values = [float(value) for value in vector]
-    if not values or not all(math.isfinite(value) for value in values):
-        raise ValueError("vector must contain finite numbers")
-    norm = math.sqrt(sum(value * value for value in values))
-    if norm == 0:
-        return [0.0 for _ in values]
-    return [value / norm for value in values]

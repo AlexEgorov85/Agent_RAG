@@ -2,7 +2,7 @@
 """Сборка постоянного FAISS-индекса для выбранного корпуса чанков.
 
 Эмбеддинги считаются тем же адаптером и кэшем, что и runtime
-(``CourseEmbeddings`` + ``data/cache/embeddings_{fingerprint}.json``).
+(``ReportEmbeddings`` + ``data/cache/embeddings_{fingerprint}.json``).
 Готовый артефакт раскладывается как::
 
     data/indexes/{index_fingerprint}/index.faiss
@@ -34,7 +34,7 @@ from src.core.cache import (  # noqa: E402
     corpus_fingerprint,
 )
 from src.core.corpus import load_chunks  # noqa: E402
-from src.core.embeddings import CourseEmbeddings  # noqa: E402
+from src.core.embeddings import ReportEmbeddings, make_embeddings_client  # noqa: E402
 from src.core.faiss_index import (  # noqa: E402
     FaissDenseIndex,
     FaissIndexError,
@@ -143,17 +143,12 @@ def main(argv: list[str] | None = None) -> int:
             print("Готовый кэш эмбеддингов не найден; API не вызывается.",
                   file=sys.stderr)
             return 1
-        api_key = (os.getenv("LLM_API_KEY") or "").strip()
-        base_url = (os.getenv("LLM_BASE_URL") or "").strip()
-        if not api_key or not base_url:
-            print("Не заданы LLM_API_KEY/LLM_BASE_URL в .env или окружении.",
-                  file=sys.stderr)
+        try:
+            embed_client = make_embeddings_client()
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
             return 1
-        from openai import OpenAI
-
-        client = OpenAI(api_key=api_key, base_url=base_url, timeout=90,
-                        max_retries=2)
-        embeddings = CourseEmbeddings(client, model, query_prefix)
+        embeddings = ReportEmbeddings(embed_client, model, query_prefix)
         try:
             vectors = cached_document_vectors(
                 chunks, embeddings, args.cache_dir, batch_size=args.batch_size

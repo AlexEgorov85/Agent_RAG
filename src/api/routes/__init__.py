@@ -1,4 +1,4 @@
-"""Сборка маршрутов ``/api`` (evaluation endpoints здесь не реализуются)."""
+"""Сборка общих маршрутов ``/api``; evaluation и documents подключаются в ``app``."""
 
 from __future__ import annotations
 

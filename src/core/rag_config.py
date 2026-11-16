@@ -1,4 +1,4 @@
-"""Конфигурация retrieval/генерации (курсовые Settings + наши лимиты)."""
+"""Конфигурация retrieval/генерации и лимиты проекта."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-#: Курсовая инструкция для Giga-Embeddings-instruct (Занятие 3).
+#: Инструкция-префикс для Giga-Embeddings-instruct.
 DEFAULT_QUERY_PREFIX = (
     "Instruct: Given a query, retrieve relevant passages\nQuery: "
 )
@@ -31,6 +31,14 @@ class RAGSettings(BaseSettings):
     embeddings_model: str = Field(
         default="ai-sage/Giga-Embeddings-instruct-3B",
         validation_alias=AliasChoices("EMBED_MODEL", "EMBEDDINGS_MODEL"))
+    #: Отдельный провайдер эмбеддингов (например, NeuralDeep), пока LLM
+    #: остаётся на Cloud.ru. Пусто — эмбеддинги идут через базовый клиент.
+    embed_base_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("EMBED_BASE_URL", "EMBEDDINGS_BASE_URL"))
+    embed_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("EMBED_API_KEY", "NEURALDEEP_API_KEY"))
     query_prefix: str = Field(
         default=DEFAULT_QUERY_PREFIX,
         validation_alias=AliasChoices("EMBED_QUERY_PREFIX", "QUERY_PREFIX"))
@@ -101,12 +109,8 @@ class RAGSettings(BaseSettings):
     faiss_persist: bool = True
     indexes_dir: Path = Path("data/indexes")
 
-    def client_kwargs(self) -> dict:
-        """Параметры OpenAI-совместимого клиента Cloud.ru (курс, Занятие 1)."""
-        return {"base_url": self.base_url, "timeout": 90, "max_retries": 2}
-
     def temporal_search_limits(self) -> dict[str, int]:
-        """Лимиты для ``TemporalSearch`` в виде kwargs конструктора."""
+        """Лимиты для ``PerYearSearch`` в виде kwargs конструктора."""
         return {"per_year_k": self.per_year_k, "max_years": self.max_years}
 
 

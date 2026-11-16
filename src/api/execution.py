@@ -18,7 +18,7 @@ Priority = Literal["chat", "evaluation"]
 
 
 class PriorityGate:
-    """Один активныйturn; chat имеет приоритет над evaluation."""
+    """Один активный turn; chat имеет приоритет над evaluation."""
 
     def __init__(self) -> None:
         self._condition = threading.Condition()
@@ -27,6 +27,7 @@ class PriorityGate:
 
     @contextmanager
     def hold(self, priority: Priority) -> Iterator[None]:
+        """Захватить право на один turn с учётом приоритета."""
         with self._condition:
             if priority == "chat":
                 self._chat_waiting += 1
@@ -80,11 +81,12 @@ class ExecutionGate:
                 return getattr(self._provider(), method)(*args, **kwargs)
 
     def ask(self, *args: Any, **kwargs: Any) -> Any:
+        """Выполнить ``ask`` под gate и LLM-lock."""
         return self._call("ask", *args, **kwargs)
 
     @property
     def supports_stream(self) -> bool:
-        """Прокси не должен выдавать себя за backend с ``stream``."""
+        """True, если backend умеет ``stream``; прокси его не подменяет."""
         return callable(getattr(self._provider(), "stream", None))
 
     def stream(self, *args: Any, **kwargs: Any) -> Iterator[Any]:

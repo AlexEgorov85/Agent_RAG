@@ -1,0 +1,388 @@
+{
+  "schema_version": "1.1",
+  "suite": "multi_turn",
+  "expected_corpus_sha256": "c70aabb541d07f2d5e4e7da477521e9f2e50bfb63abaf89d8c0a459a5d227154",
+  "tests": [
+    {
+      "id": "multi_turn_001",
+      "suite": "multi_turn",
+      "split": "dev",
+      "category": "dialogue",
+      "difficulty": "medium",
+      "tags": [
+        "context",
+        "numeric",
+        "???????"
+      ],
+      "dialogue_policy": {
+        "follow_up_year": "reuse_topic"
+      },
+      "turns": [
+        {
+          "question": "????? ?????? ??????? ? ????????? ?? 2025 ????",
+          "behavior": "continue_previous_request",
+          "expected_status": "answer",
+          "expected": {
+            "required_facts": [
+              {
+                "metric": "net_profit",
+                "metric_aliases": [
+                  "чистая прибыль"
+                ],
+                "year": 2025,
+                "value": 1705.9,
+                "unit": "млрд руб.",
+                "unit_aliases": [
+                  "млрд рублей",
+                  "млрд руб"
+                ],
+                "tolerance": 0.01
+              }
+            ],
+            "required_years": [
+              2025
+            ],
+            "required_documents": [
+              "sber_2025"
+            ],
+            "required_issuers": [],
+            "required_answer_elements": [],
+            "required_calculations": [],
+            "required_structural_changes": [],
+            "missing_years": []
+          },
+          "gold_evidence": {
+            "min_coverage": 1.0,
+            "groups": [
+              {
+                "id": "net_profit_2025",
+                "any_of": [
+                  "sber_2025:00070:c0:00dabc46d736",
+                  "sber_2025:04212:c0:305872c43506",
+                  "sber_2025:04237:c1:f00478933e74",
+                  "sber_2025:04249:c0:a0eb8021225e",
+                  "sber_2025:06954:c0:453c6bf65cb1",
+                  "sber_2025:06963:c0:f6a09057d36e"
+                ],
+                "section": ""
+              }
+            ]
+          },
+          "expected_behavior": {
+            "retrieval_modes": [
+              "hybrid"
+            ],
+            "max_search_calls": 2,
+            "max_tool_calls": 4,
+            "must_use_tools": [
+              "search_reports"
+            ],
+            "must_use_tools_strict": false,
+            "may_use_tools": [
+              "get_chunk"
+            ],
+            "must_not_use_tools": [],
+            "strict_search_budget": false,
+            "must_cite_sources": true,
+            "must_abstain_if_missing": true
+          },
+          "checks": {
+            "must_mention": [
+              "2025"
+            ],
+            "must_not_mention": [],
+            "forbidden_values": [],
+            "forbidden_years": [],
+            "expected_warnings": [],
+            "must_not_invent_values": true,
+            "strict_quotes": false
+          }
+        },
+        {
+          "question": "? ?? 2024 ????",
+          "behavior": "continue_previous_request",
+          "expected_status": "answer",
+          "expected": {
+            "required_facts": [
+              {
+                "metric": "net_profit",
+                "metric_aliases": [
+                  "чистая прибыль"
+                ],
+                "year": 2024,
+                "value": 1580.3,
+                "unit": "млрд руб.",
+                "unit_aliases": [
+                  "млрд рублей",
+                  "млрд руб"
+                ],
+                "tolerance": 0.01
+              }
+            ],
+            "required_years": [
+              2024
+            ],
+            "required_documents": [
+              "sber_2024"
+            ],
+            "required_issuers": [],
+            "required_answer_elements": [],
+            "required_calculations": [],
+            "required_structural_changes": [],
+            "missing_years": []
+          },
+          "gold_evidence": {
+            "min_coverage": 1.0,
+            "groups": [
+              {
+                "id": "net_profit_2024",
+                "any_of": [
+                  "sber_2024:02703:c1:5d346777e4b9",
+                  "sber_2024:00069:c3:7041d451da67",
+                  "sber_2024:02682:c0:7e775116b9b6",
+                  "sber_2024:02710:c0:f933b9f0bd64",
+                  "sber_2024:04928:c0:fd8bfedd1dad",
+                  "sber_2024:04933:c0:aeb02ff7f4fd",
+                  "sber_2024:04942:c0:ce8a1d5f48ca"
+                ],
+                "section": ""
+              }
+            ]
+          },
+          "expected_behavior": {
+            "retrieval_modes": [
+              "hybrid"
+            ],
+            "max_search_calls": 2,
+            "max_tool_calls": 4,
+            "must_use_tools": [
+              "search_reports"
+            ],
+            "must_use_tools_strict": false,
+            "may_use_tools": [
+              "get_chunk"
+            ],
+            "must_not_use_tools": [],
+            "strict_search_budget": false,
+            "must_cite_sources": true,
+            "must_abstain_if_missing": true
+          },
+          "checks": {
+            "must_mention": [
+              "2024"
+            ],
+            "must_not_mention": [],
+            "forbidden_values": [],
+            "forbidden_years": [],
+            "expected_warnings": [],
+            "must_not_invent_values": true,
+            "strict_quotes": false
+          }
+        }
+      ],
+      "scenario_checks": [
+        "context_preserved",
+        "correct_metric",
+        "correct_period",
+        "no_unnecessary_restart",
+        "sources_preserved"
+      ],
+      "required_checks": [
+        "context_preserved",
+        "correct_metric",
+        "correct_period",
+        "no_unnecessary_restart",
+        "sources_preserved"
+      ],
+      "notes": "?????? ??? ?????? ?????? ???: ??????? ?????? ??????????? ?? ?????????."
+    },
+    {
+      "id": "multi_turn_002",
+      "suite": "multi_turn",
+      "split": "dev",
+      "category": "dialogue",
+      "difficulty": "medium",
+      "tags": [
+        "context",
+        "numeric",
+        "ROE"
+      ],
+      "dialogue_policy": {
+        "follow_up_year": "reuse_topic"
+      },
+      "turns": [
+        {
+          "question": "????? ?????????????? ???????? ? ????????? ?? 2025 ????",
+          "behavior": "continue_previous_request",
+          "expected_status": "answer",
+          "expected": {
+            "required_facts": [
+              {
+                "metric": "roe",
+                "metric_aliases": [
+                  "рентабельность капитала",
+                  "ROE"
+                ],
+                "year": 2025,
+                "value": 22.7,
+                "unit": "%",
+                "unit_aliases": [
+                  "процент",
+                  "%"
+                ],
+                "tolerance": 0.01
+              }
+            ],
+            "required_years": [
+              2025
+            ],
+            "required_documents": [
+              "sber_2025"
+            ],
+            "required_issuers": [],
+            "required_answer_elements": [],
+            "required_calculations": [],
+            "required_structural_changes": [],
+            "missing_years": []
+          },
+          "gold_evidence": {
+            "min_coverage": 1.0,
+            "groups": [
+              {
+                "id": "roe_2025",
+                "any_of": [
+                  "sber_2025:00085:c0:edf9540651f3",
+                  "sber_2025:00070:c0:00dabc46d736",
+                  "sber_2025:00329:c0:60f62e8d503d",
+                  "sber_2025:04220:c0:7ecffb2d0bc7"
+                ],
+                "section": ""
+              }
+            ]
+          },
+          "expected_behavior": {
+            "retrieval_modes": [
+              "hybrid"
+            ],
+            "max_search_calls": 2,
+            "max_tool_calls": 4,
+            "must_use_tools": [
+              "search_reports"
+            ],
+            "must_use_tools_strict": false,
+            "may_use_tools": [
+              "get_chunk"
+            ],
+            "must_not_use_tools": [],
+            "strict_search_budget": false,
+            "must_cite_sources": true,
+            "must_abstain_if_missing": true
+          },
+          "checks": {
+            "must_mention": [
+              "2025"
+            ],
+            "must_not_mention": [],
+            "forbidden_values": [],
+            "forbidden_years": [],
+            "expected_warnings": [],
+            "must_not_invent_values": true,
+            "strict_quotes": false
+          }
+        },
+        {
+          "question": "? ?? 2023 ????",
+          "behavior": "continue_previous_request",
+          "expected_status": "answer",
+          "expected": {
+            "required_facts": [
+              {
+                "metric": "roe",
+                "metric_aliases": [
+                  "рентабельность капитала",
+                  "ROE"
+                ],
+                "year": 2023,
+                "value": 25.3,
+                "unit": "%",
+                "unit_aliases": [
+                  "процент",
+                  "%"
+                ],
+                "tolerance": 0.01
+              }
+            ],
+            "required_years": [
+              2023
+            ],
+            "required_documents": [
+              "sber_2023"
+            ],
+            "required_issuers": [],
+            "required_answer_elements": [],
+            "required_calculations": [],
+            "required_structural_changes": [],
+            "missing_years": []
+          },
+          "gold_evidence": {
+            "min_coverage": 1.0,
+            "groups": [
+              {
+                "id": "roe_2023",
+                "any_of": [
+                  "sber_2023:00078:c3:c5cc6e1f46e2",
+                  "sber_2023:02163:c0:52f3272e800a"
+                ],
+                "section": ""
+              }
+            ]
+          },
+          "expected_behavior": {
+            "retrieval_modes": [
+              "hybrid"
+            ],
+            "max_search_calls": 2,
+            "max_tool_calls": 4,
+            "must_use_tools": [
+              "search_reports"
+            ],
+            "must_use_tools_strict": false,
+            "may_use_tools": [
+              "get_chunk"
+            ],
+            "must_not_use_tools": [],
+            "strict_search_budget": false,
+            "must_cite_sources": true,
+            "must_abstain_if_missing": true
+          },
+          "checks": {
+            "must_mention": [
+              "2023"
+            ],
+            "must_not_mention": [],
+            "forbidden_values": [],
+            "forbidden_years": [],
+            "expected_warnings": [],
+            "must_not_invent_values": true,
+            "strict_quotes": false
+          }
+        }
+      ],
+      "scenario_checks": [
+        "context_preserved",
+        "correct_metric",
+        "correct_period",
+        "no_unnecessary_restart",
+        "sources_preserved"
+      ],
+      "required_checks": [
+        "context_preserved",
+        "correct_metric",
+        "correct_period",
+        "no_unnecessary_restart",
+        "sources_preserved"
+      ],
+      "notes": "?????? ??? ?????? ?????? ???: ??????? ?????? ??????????? ?? ?????????."
+    }
+  ]
+}

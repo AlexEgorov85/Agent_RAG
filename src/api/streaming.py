@@ -26,15 +26,18 @@ SSE_TERMINAL_TYPES = serialize.TERMINAL_EVENT_TYPES
 
 @dataclass(frozen=True)
 class BufferedEvent:
+    """Событие с ``sequence`` для replay."""
     sequence: int
     payload: dict[str, Any]
 
     @property
     def event_type(self) -> str:
+        """Тип события."""
         return str(self.payload.get("type") or "")
 
     @property
     def is_terminal(self) -> bool:
+        """Терминальное ли событие."""
         return self.event_type in SSE_TERMINAL_TYPES
 
 
@@ -53,6 +56,7 @@ class EventChannel:
         self._finished_at: float | None = None
 
     def publish(self, payload: Mapping[str, Any]) -> BufferedEvent | None:
+        """Добавить событие в буфер."""
         with self._condition:
             if self._closed:
                 return None
@@ -89,6 +93,7 @@ class EventChannel:
                 self._condition.wait(remaining)
 
     def close(self) -> None:
+        """Закрыть канал."""
         with self._condition:
             self._closed = True
             if self._finished_at is None:
@@ -96,40 +101,42 @@ class EventChannel:
             self._condition.notify_all()
 
     def mark_cancelled(self) -> None:
+        """Пометить отмену запроса."""
         with self._condition:
             self._cancel_requested = True
             self._condition.notify_all()
 
     def set_backend_request_id(self, request_id: str) -> None:
+        """Запомнить ID запроса backend'а."""
         with self._condition:
             if self._backend_request_id is None:
                 self._backend_request_id = request_id
 
     @property
     def backend_request_id(self) -> str | None:
+        """ID запроса backend'а."""
         return self._backend_request_id
 
     @property
     def cancel_requested(self) -> bool:
+        """Запрошена ли отмена."""
         return self._cancel_requested
 
     @property
     def closed(self) -> bool:
+        """Закрыт ли канал."""
         return self._closed
 
     @property
     def finished_at(self) -> float | None:
+        """Время завершения канала."""
         return self._finished_at
 
     @property
     def first_sequence(self) -> int:
+        """``sequence`` первого события в буфере."""
         with self._condition:
             return self._buffer[0].sequence if self._buffer else 0
-
-    @property
-    def last_sequence(self) -> int:
-        with self._condition:
-            return self._buffer[-1].sequence if self._buffer else 0
 
 
 class EventHub:
@@ -149,6 +156,7 @@ class EventHub:
 
     # ------------------------------------------------------------------ channel
     def open(self, request_id: str) -> EventChannel:
+        """Создать канал для запроса."""
         with self._lock:
             self._purge_locked()
             channel = self._channels.get(request_id)
@@ -160,6 +168,7 @@ class EventHub:
             return channel
 
     def get(self, request_id: str) -> EventChannel | None:
+        """Канал по ``request_id``."""
         with self._lock:
             return self._channels.get(request_id)
 
@@ -182,6 +191,7 @@ class EventHub:
         filters: Any,
         service: Any,
     ) -> None:
+        """Запустить выполнение запроса."""
         channel = self.open(request_id)
         self.store.mark_request_running(request_id)
         thread = threading.Thread(
@@ -514,6 +524,7 @@ class EventHub:
         return "cancelled", True
 
     def shutdown(self) -> None:
+        """Остановить все каналы."""
         with self._lock:
             channels = list(self._channels.values())
             self._channels.clear()

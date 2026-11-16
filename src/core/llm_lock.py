@@ -8,7 +8,7 @@ evaluation и CLI benchmark. Внутрипроцессный ``ExecutionGate`` 
 Lock-файл — атомарно создаваемый JSON без prompt/секретов:
 
 ```json
-{"pid": 123, "kind": "cli", "run_id": "...", "test_id": "...",
+{"pid": 123, "token": "...", "kind": "cli", "run_id": "...", "test_id": "...",
  "acquired_at": "...", "heartbeat_at": "..."}
 ```
 
@@ -111,6 +111,7 @@ def _env_float(name: str, default: float) -> float:
 
 
 def lock_path_from_env() -> Path:
+    """Путь lock-файла из env."""
     raw = os.getenv("LLM_LOCK_PATH")
     return Path(raw) if raw and raw.strip() else DEFAULT_LOCK_PATH
 
@@ -183,6 +184,7 @@ class LLMExecutionLock:
                 return list(self.warnings)
 
     def release(self) -> None:
+        """Освободить принадлежащий нам lock."""
         self._stop_heartbeat()
         if not self._held:
             return
@@ -207,15 +209,9 @@ class LLMExecutionLock:
         payload["heartbeat_at"] = _utc_now()
         self._write(payload)
 
-    def __enter__(self) -> "LLMExecutionLock":
-        self.acquire(wait=True)
-        return self
-
-    def __exit__(self, *exc_info: Any) -> None:
-        self.release()
-
     @contextmanager
     def held(self, *, wait: bool = True) -> Iterator["LLMExecutionLock"]:
+        """Контекстный менеджер удержания lock."""
         self.acquire(wait=wait)
         try:
             yield self

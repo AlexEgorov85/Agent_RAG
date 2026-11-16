@@ -32,6 +32,7 @@ def create_research(
     config: ApiConfig = Depends(get_config),
     store: Store = Depends(get_store),
 ) -> ResearchSummary:
+    """Создать исследование."""
     title = (payload.title if payload else None) or DEFAULT_RESEARCH_TITLE
     if len(title) > config.request_title_limit:
         raise validation_error("Слишком длинное название диалога.")
@@ -50,6 +51,7 @@ def list_research(
     config: ApiConfig = Depends(get_config),
     store: Store = Depends(get_store),
 ) -> ResearchListResponse:
+    """Список исследований владельца."""
     page_size = config.page_size_default if limit is None else limit
     if page_size > config.page_size_max:
         raise validation_error(
@@ -78,6 +80,7 @@ def get_research(
     owner: Owner,
     store: Store = Depends(get_store),
 ) -> ResearchSummary:
+    """Исследование по ID."""
     row = store.get_research(owner, research_id)
     if row is None:
         raise not_found("Диалог не найден.")
@@ -95,6 +98,7 @@ def rename_research(
     owner: Owner,
     store: Store = Depends(get_store),
 ) -> ResearchSummary:
+    """Переименовать исследование."""
     row = store.update_research_title(owner, research_id, payload.title)
     if row is None:
         raise not_found("Диалог не найден.")
@@ -109,6 +113,7 @@ def delete_research(
     owner: Owner,
     store: Store = Depends(get_store),
 ) -> Response:
+    """Удалить исследование."""
     if not store.delete_research(owner, research_id):
         raise not_found("Диалог не найден.")
     return Response(status_code=204)

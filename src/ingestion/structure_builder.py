@@ -17,13 +17,14 @@
    разметку последнего виденного уровня, а не всегда один фиксированный.
 
 Инварианты: поля ``RawElement`` не изменяются (парсер — источник истины);
-уровень живёт только в ``SectionNode``. Курсовой контракт чанка не меняется:
-``section_path``/``breadcrumbs`` — опциональные поля поверх Занятие 2-контракта
+уровень живёт только в ``SectionNode``. Контракт чанка не меняется:
+``section_path``/``breadcrumbs`` — опциональные поля поверх обязательных полей К2
 (см. `spec_project.md` §5.2).
 
 Приоритет источников уровня (согласован): **PDF outline (закладки) → текст
-«Содержание» → эвристика по Title**. Закладки читает ``pdf_outline.py`` и
-передаёт сюда готовым списком (``outline=``), поэтому обратного импорта нет.
+«Содержание» → эвристика по Title**. Закладки читает ``pdf_outline.py``;
+готовый список принимается через ``outline=``, а при необходимости
+``read_outline_safely`` читает их лениво, поэтому цикла импортов нет.
 """
 
 from __future__ import annotations
@@ -35,6 +36,8 @@ from difflib import SequenceMatcher
 from html import unescape
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+
+from src.core.io import atomic_write_json
 
 from src.core.models import RawElement
 
@@ -127,7 +130,7 @@ class DocumentStructure:
     """Плоский список разделов документа; дерево восстанавливается по parent_id.
 
     Attributes:
-        doc_id: Идентификатор документа (как в курсовом реестре, ``sber_2015``).
+        doc_id: Идентификатор документа (как в реестре источников, ``sber_2015``).
         sections: Разделы в порядке появления в документе.
     """
 
@@ -146,16 +149,8 @@ class DocumentStructure:
                    sections=[SectionNode.from_dict(item)
                              for item in data.get("sections", [])])
 
-    def render_tree(self) -> str:
-        """Многострочное представление дерева для глаз-проверки (отступ × уровень)."""
-        lines = [
-            "  " * s.level + f"[{s.level}] {s.title} (стр. {s.page_start})"
-            for s in self.sections
-        ]
-        return "\n".join(lines)
 
-
-def _section_path(breadcrumbs: Sequence[str]) -> str:
+def section_path(breadcrumbs: Sequence[str]) -> str:
     """Из breadcrumbs делает строковый ключ: ``раздел/подраздел``."""
     return "/".join(breadcrumbs)
 
@@ -165,11 +160,6 @@ def _section_path(breadcrumbs: Sequence[str]) -> str:
 _TOC_HEADER_RE = re.compile(
     r"^\s*(СОДЕРЖАНИ[ЕИЮ]|ОГЛАВЛЕНИ[ЕИЮ]|CONTENTS)\s*:?\s*$",
     re.IGNORECASE,
-)
-#: Строка TOC: «< название > < номер страницы >(+ числа суб-столбцов)»
-_TOC_ENTRY_RE = re.compile(
-    r"^(?P<name>.{2,80}?)\s+(?P<pages>\d{1,3}(?:\s+\d{1,3})*)$",
-    re.DOTALL,
 )
 #: Максимальное «значение страницы» TOC (годы вида 2023 не считаются)
 _TOC_MAX_PAGE = 2000
@@ -614,11 +604,11 @@ def parse_toc_entries(elements: Sequence[RawElement]) -> List[TocEntry]:
 
 
 def toc_level_map(entries: Sequence[TocEntry]) -> Dict[str, int]:
-    """Нормализованное имя → уровень (по нумерации имени внутри TOC).
+    """Нормализованное имя → уровень (только для записей с нумерацией).
 
-    Записи TOC без нумерации считаются верхними частями (level 0): в годовых
-    отчётах крупные части обоходятся без цифр, а числовые подразделы
-    перечисляются с номерами — это и есть различающий сигнал.
+    Записи TOC без нумерации пропускаются: иначе все части получили бы level 0
+    и затёрли более сильный bbox/outline-сигнал. Такие имена остаются только
+    для page-навигации.
     """
     out: Dict[str, int] = {}
     for entry in entries:
@@ -644,23 +634,6 @@ def normalize_section_name(text: str) -> str:
     collapsed = collapsed.translate(_HOMOGLYPHS)
     collapsed = re.sub(r"[^0-9A-Za-zА-Яа-яЁё ]", " ", collapsed)
     return re.sub(r"\s+", " ", collapsed).strip().lower()
-
-
-def _infer_stack_level(text: str, last_inferred: int) -> int:
-    """Определить уровень заголовка: явная эвристика или фолбэк «наследует».
-
-    Явный сигнал (нумерация/капс) доверяем как есть. Без сигнала заголовок
-    продолжает размётку последнего уровня, но не «ныряет» глубже одного шага
-    за раз и не уходит глубже уровня 2 — иначе случайные строки глубоко рушат
-    дерево.
-    """
-    inferred = infer_title_level(text)
-    if inferred is not None:
-        return inferred
-    # Без сигнала заголовок — «сестра» предыдущего, а не ребёнок: прежний
-    # min(last+1, 2) уводил в ложную вложенность все неразмеченные части
-    # («Об Отчете» → родитель всей книги). Глубину дают outline/TOC/bbox.
-    return last_inferred
 
 
 def is_junk_title(text: str) -> bool:
@@ -862,23 +835,9 @@ def save_sections(structure: DocumentStructure, structure_dir: Path) -> Path:
     Returns:
         Путь к записанному файлу.
     """
-    import json
-    import os
-    import tempfile
-    from pathlib import Path
-
     structure_dir = Path(structure_dir)
-    structure_dir.mkdir(parents=True, exist_ok=True)
     target = structure_dir / f"{structure.doc_id}_sections.json"
-    handle = tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", suffix=".json",
-        dir=structure_dir, delete=False)
-    try:
-        json.dump(structure.to_dict(), handle, ensure_ascii=False, indent=1)
-        handle.flush()
-    finally:
-        handle.close()
-    os.replace(handle.name, target)
+    atomic_write_json(target, structure.to_dict(), indent=1)
     return target
 
 
@@ -1091,7 +1050,6 @@ def _calibrate_toc_offset(toc: Sequence["TocEntry"],
 
 
 def _skeleton_entries(toc: Sequence["TocEntry"], outline: Sequence[Any],
-                      height_by_name: Mapping[str, int],
                       last_page: Optional[int] = None,
                       title_index: Optional[Mapping[str, Tuple[str, int]]] = None
                       ) -> List[Tuple[str, int, int]]:
@@ -1277,7 +1235,7 @@ def _build_from_skeleton(entries: Sequence[Tuple[str, int, int]],
         stack = [node for node in stack if node.level < level]
         breadcrumbs = [node.title for node in stack] + [title]
         node = SectionNode(
-            id=_section_path(breadcrumbs), title=title, level=level,
+            id=section_path(breadcrumbs), title=title, level=level,
             page_start=page, page_end=page, breadcrumbs=breadcrumbs,
             parent_id=stack[-1].id if stack else None)
         if stack:
@@ -1311,16 +1269,13 @@ def build_document_structure(elements: Sequence[RawElement],
             ``{"title", "level"}``) — самый точный источник уровней.
 
     Returns:
-        ``DocumentStructure`` с проставленными page_start/page_end.
+        ``DocumentStructure`` с проставленными page_start/page_end. Если
+        ``_skeleton_entries`` дал ≥5 записей, дерево строится только по
+        outline/TOC; иначе уровни Title уточняются по TOC и эвристикам.
     """
     if doc_id is None and elements:
         doc_id = elements[0].doc_id
     height_levels = _height_level_map(elements)
-    height_by_name: Dict[str, int] = {}
-    for element in elements:
-        if element.element_id in height_levels:
-            height_by_name.setdefault(normalize_section_name(element.text),
-                                      height_levels[element.element_id])
     last_page = max((element.page for element in elements), default=0)
     toc_pages = _toc_page_numbers(elements)
     title_index: Dict[str, Tuple[str, int]] = {}
@@ -1332,7 +1287,7 @@ def build_document_structure(elements: Sequence[RawElement],
             continue
         title_index.setdefault(normalize_section_name(text),
                                (text, element.page))
-    skeleton = _skeleton_entries(toc or [], outline or [], height_by_name,
+    skeleton = _skeleton_entries(toc or [], outline or [],
                                  last_page=last_page or None,
                                  title_index=title_index)
     if len(skeleton) >= 5:
@@ -1380,7 +1335,7 @@ def build_document_structure(elements: Sequence[RawElement],
         stack = [node for node in stack if node.level < level]
         breadcrumbs = [s.title for s in stack] + [element.text.strip()]
         node = SectionNode(
-            id=_section_path(breadcrumbs),
+            id=section_path(breadcrumbs),
             title=element.text.strip(),
             level=level,
             page_start=element.page,

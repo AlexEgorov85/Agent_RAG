@@ -13,7 +13,7 @@ import re
 import sys
 from typing import Any
 
-from src.core.embeddings import CourseEmbeddings
+from src.core.embeddings import ReportEmbeddings, make_embeddings_client
 from src.retrieval.reranker import LLMReranker
 
 
@@ -56,6 +56,7 @@ def run_smoke(
     query_prefix: str = "query:",
     check_embeddings: bool = True,
     check_reranker: bool = True,
+    embedding_client: Any = None,
 ) -> SmokeResult:
     """Выполняет выбранные проверки через переданный OpenAI-совместимый клиент.
 
@@ -71,8 +72,8 @@ def run_smoke(
     if check_embeddings:
         if not embedding_model:
             raise ValueError("EMBED_MODEL is required for the embeddings smoke test")
-        adapter = CourseEmbeddings(
-            client=client,
+        adapter = ReportEmbeddings(
+            client=embedding_client or client,
             model=embedding_model,
             query_prefix=query_prefix,
         )
@@ -154,19 +155,25 @@ def main(argv: list[str] | None = None) -> int:
         from openai import OpenAI
 
         load_dotenv()
-        api_key = os.getenv("LLM_API_KEY")
-        base_url = os.getenv("LLM_BASE_URL")
-        if not api_key or not base_url:
-            raise ValueError("LLM_API_KEY and LLM_BASE_URL must be configured")
+        client = None
+        embedding_client = None
+        if check_reranker:
+            api_key = os.getenv("LLM_API_KEY")
+            base_url = os.getenv("LLM_BASE_URL")
+            if not api_key or not base_url:
+                raise ValueError("LLM_API_KEY and LLM_BASE_URL must be configured")
 
-        client = OpenAI(api_key=api_key, base_url=base_url)
+            client = OpenAI(api_key=api_key, base_url=base_url)
+        if check_embeddings:
+            embedding_client = make_embeddings_client(fallback_client=client)
         result = run_smoke(
-            client,
+            client or embedding_client,
             embedding_model=os.getenv("EMBED_MODEL"),
             reranker_model=os.getenv("RERANKER_MODEL"),
             query_prefix=os.getenv("EMBED_QUERY_PREFIX", "query:"),
             check_embeddings=check_embeddings,
             check_reranker=check_reranker,
+            embedding_client=embedding_client,
         )
     except SmokeFailure as exc:
         print(

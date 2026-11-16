@@ -1,7 +1,7 @@
 # Sberbank Annual Reports Graph RAG
 
-Structure-aware RAG по годовым отчётам Сбербанка за 2015–2020 и 2022–2024
-(9 PDF-файлов, 2021 года в корпусе нет).
+Structure-aware RAG по годовым отчётам Сбербанка за 2015–2020 и 2022–2025
+(10 PDF-файлов, 2021 года в корпусе нет).
 
 Система извлекает из PDF текст, таблицы и изображения, строит дерево разделов,
 чанки и граф сущностей, затем отвечает на вопросы по найденным фрагментам и
@@ -16,7 +16,7 @@ benchmark/evaluation.
 > - Backend-контур, LangGraph-агент, Streamlit UI, HTTP API, React WebUI
 >   (этапы 1–4 и часть 5) и Evaluation API/UI реализованы. Evaluation-раздел
 >   выключен по умолчанию (`EVAL_UI_ENABLED=0`).
-> - Офлайн-набор: `854 passed` (Python 3.11.9, `.venv`), 160 frontend-тестов в
+> - Офлайн-набор: `863 passed` (Python 3.11.9, `.venv`), 160 frontend-тестов в
 >   24 файлах Vitest, 7/7 Playwright E2E, `tsc -b` и `vite build` проходят.
 > - Реальная dev-приёмка (снимок 15.11.2026 02:44) — 4/4 сценария: factoid,
 >   temporal, structural, abstain.
@@ -29,15 +29,16 @@ benchmark/evaluation.
 >   `eval/results/20261115_183541_0a97989/`. Предыдущий прогон дал 24/30
 >   (`eval/results/20261115_174124_0a97989/`); per-test стабильность не
 >   измерялась (`repeat=1`).
-> - Полный корпус из 9 PDF **не собран**: `elements`, `structure` и `chunks`
->   готовы для 2015–2018 (3928 чанков, 98% со структурой); 2019–2024 не
->   парсились. Полный graph-индекс собран частично: 1916/3928 чанков,
->   артефакт `b288dd3c…` имеет `status=incomplete` (2012 чанков 2017–2018 упали
->   на 403 Cloud.ru). Фабрика поэтому использует полный dev-граф
->   `a8ce50f6…` (536 чанков, 2022–2023, 163 раздела).
+> - Полный корпус из 10 PDF **спарсен**: `elements`, `structure` и `chunks`
+>   есть для 2015–2020 и 2022–2025, всего **13969 чанка**, 98.4% со структурой;
+>   2021 отсутствует физически. FAISS для всех 13969 чанков собран
+>   (`84cd7bd4…`, 2048 измерений, ≈114 МБ). Полный graph-индекс строится;
+>   partial graph-артефакт `b288dd3c…` имеет `status=incomplete`, поэтому
+>   фабрика пока использует dev-граф `a8ce50f6…` (536 чанков, 2022–2023,
+>   163 раздела).
 > - Чат и benchmark по умолчанию работают на dev-корпусе (2016, 2017, 2022,
 >   2023; 1025 чанков, `data/dev/`). Цифры benchmark нельзя переносить на
->   полный корпус 9 PDF.
+>   полный корпус 10 PDF.
 >
 > Подробности — в разделах «Архитектура», «Данные и состояние корпуса»,
 > «Ограничения», а также в `data/corpus_build_status.md` и `eval/results/`.
@@ -149,6 +150,15 @@ RERANKER_MODEL=ai-sage/GigaChat3-10B-A1.8B
 RERANK_ENABLED=1
 ```
 
+Если LLM остаётся на Cloud.ru, а эмбеддинги нужно вынести на другой
+OpenAI-совместимый провайдер (например, NeuralDeep `giga-embeddings`), добавьте:
+
+```dotenv
+EMBED_BASE_URL=https://api.neuraldeep.ru/v1
+EMBED_API_KEY=sk-...
+EMBED_MODEL=giga-embeddings
+```
+
 Без ключа работают офлайн-тесты и `eval.runner --fake-service`; реальный чат,
 индексация эмбеддингов, реранкер и benchmark требуют доступа к Cloud.ru API.
 
@@ -159,7 +169,7 @@ RERANK_ENABLED=1
 
 - локально уже есть `data/raw/*.pdf`, `data/source_registry.json` и готовые
   артефакты (`data/dev/` или `data/chunks/`);
-- либо положите 9 PDF в `data/raw/` и соберите корпус командами из раздела
+- либо положите 10 PDF в `data/raw/` и соберите корпус командами из раздела
   «Запуск» (`scripts/build_corpus.py`, `scripts/build_dev_corpus.py`).
 
 По умолчанию чат использует готовый dev-корпус из 4 документов
@@ -462,7 +472,9 @@ npx playwright install chromium
 | `LLM_BASE_URL` | `https://foundation-models.api.cloud.ru/v1` | OpenAI-совместимый endpoint |
 | `LLM_MODEL` | `GigaChat/GigaChat-3-Pro` | генерация ответа |
 | `EMBED_MODEL` | `ai-sage/Giga-Embeddings-instruct-3B` | эмбеддинги |
-| `EMBED_QUERY_PREFIX` | Instruct/Query-префикс курса | префикс запроса эмбеддингов |
+| `EMBED_BASE_URL` | пусто → `LLM_BASE_URL` | отдельный endpoint эмбеддингов (например, NeuralDeep) |
+| `EMBED_API_KEY` | пусто → `LLM_API_KEY` | ключ отдельного провайдера эмбеддингов (`NEURALDEEP_API_KEY` — алиас) |
+| `EMBED_QUERY_PREFIX` | `query:` | префикс запроса эмбеддингов; документы встраиваются без префикса |
 | `RERANKER_MODEL` | `ai-sage/GigaChat3-10B-A1.8B` | LLM-реранкер |
 | `RERANK_ENABLED` | `1` | `0` отключает реранкер |
 | `ROUTER_MODEL` | пусто → `LLM_MODEL` | модель router/rewrite/structure |
@@ -506,7 +518,6 @@ INDEXES_DIR=data/indexes
 
 | Переменная | По умолчанию | Назначение |
 |---|---|---|
-| `AUTH_MODE` | `local` | один владелец через HttpOnly cookie |
 | `API_DB_PATH` | `var/api.sqlite3` | история диалогов |
 | `API_CORS_ORIGINS` | `http://localhost:5173` | dev-origin Vite |
 | `API_SERVE_SPA` | `0` | раздавать `frontend/dist` из FastAPI |
@@ -533,35 +544,56 @@ INDEXES_DIR=data/indexes
 
 ## Данные и состояние корпуса
 
-- `data/raw/` — 9 исходных PDF (2015–2020, 2022–2024); 2021 года нет.
+- `data/raw/` — 10 исходных PDF (2015–2020, 2022–2025); 2021 года нет.
 - `data/source_registry.json` — реестр источников; проверяется
   `scripts/verify_corpus.py`.
 - `data/corpus_build_status.md` — статус сборки по `doc_id`, обновляется
   `scripts/build_corpus.py`.
-- Канонические артефакты на 15.11.2026: `elements` — 2015–2018;
-  `structure` и `chunks` — 2015–2018 (3928 чанков, 98% со структурой).
-  Документы 2019–2024 не парсились: `data/elements` для них отсутствует,
-  поэтому `structure`/`chunks` не строились.
-- Для чата и benchmark используется dev-корпус из 4 документов (2016, 2017,
-  2022, 2023; 1025 чанков, `data/dev/`): на нём собраны embeddings и dev-граф.
+- Канонические артефакты на 16.11.2026: `elements`, `structure` и `chunks` —
+  для всех 10 документов (2015–2020, 2022–2025), **13969 чанка**, 98.4% со
+  структурой, 0 пустых, 1650 таблиц; 2021 отсутствует физически.
+- Для чата, API и benchmark по умолчанию используется **полный корпус**
+  (`CHUNKS_DIR=data/chunks`, `CACHE_DIR=data/cache` в `.env`). Dev-корпус из 4
+  документов (2016, 2017, 2022, 2023; 1025 чанков, `data/dev/`) остаётся для
+  быстрых прогонов: `scripts/ask_dev.py`, `scripts/acceptance_dev.py`,
+  `scripts/build_graph_dev.py`; включается через
+  `CHUNKS_DIR=data/dev/chunks`, `CACHE_DIR=data/dev/cache`.
 - Постоянный FAISS-индекс: `data/indexes/{fingerprint}/index.faiss` +
   `manifest.json`. Fingerprint совпадает с fingerprint кэша эмбеддингов
   (тексты чанков, модель, `query_prefix`, SHA-256 источников). Индекс
   переиспользуется, если совпали корпус, модель и порядок `chunk_id`; иначе
   пересобирается.
-- На 15.11.2026 собраны индексы для канонических 3928 чанков
-  (`f744df3f…`, 2048 измерений, ≈32 МБ) и dev-корпуса (`26f393fe…`, 1025
-  чанков, ≈8 МБ); кэш канонических эмбеддингов — ≈180 МБ. Артефакты не
-  коммитятся.
-- Активный граф: `a8ce50f6…` (536 чанков, `sber_2022` + `sber_2023`, 1132
-  сущности, 851 связь, 163 раздела, `status=complete`). Полный артефакт `b288dd3c…`
-  (`status=incomplete`, 1916/3928 успешных чанков) фабрикой не активируется.
+- На 16.11.2026 собран FAISS-индекс для всех 10 документов / 13969 чанков:
+  `84cd7bd4…`, 2048 измерений, ≈114 МБ; dev-индекс — `26f393fe…` (1025 чанков).
+  Эмбеддинги считаются через Cloud.ru
+  (`ai-sage/Giga-Embeddings-instruct-3B`); NeuralDeep больше не используется.
+  Артефакты не коммитятся.
+- Активный граф: `48d7165f…` — полный корпус, 13 969 чанков, **9 996
+  сущностей**, **7 987 связей**, 1 491 раздел, `status=complete`, 0 failed.
+  Чекпоинт извлечения — `data/graph/.extraction_checkpoint.jsonl`; при
+  добавлении документов старые пакеты переиспользуются по `chunk_id`, LLM
+  вызывается только для новых чанков. Модель извлечения — `Qwen/Qwen3.6-35B-A3B`
+  (Cloud), 8 чанков за вызов, лимит вывода 16384 токена.
 - Графовый поиск использует два канала: сущностный (`MENTIONS`/`RELATED_TO`) и
   структурный — соседи верхних базовых хитов по разделу (`CONTAINS`) и странице,
   `GRAPH_STRUCTURE_BUDGET=2` на сид (`0` выключает). Бюджет измерен офлайн:
   полнота пула 0.847 → 0.908 на dev-корпусе; после реранкера прирост пула
   сохраняется (+0.03…0.05), а на выданном top-5 эффект в пределах разброса
   реранкера (`spec_graph.md` §8.6).
+- `data/metrics/metrics.json` — структурный индекс табличных значений:
+  из HTML таблиц берётся шапка с годами, поэтому каждое число получает год.
+  Если шапки нет, годы берутся из строки «2023 2024 2025» перед таблицей
+  (признак `inferred`), а канонические показатели строятся только по таблицам
+  с явной шапкой. Собирается `python scripts/build_metrics.py` (13 969 чанков →
+  8 432 значения, 10 документов).
+- Числа в ответе проверяются по этому индексу: `numeric_claim_year_mismatch`
+  (число отнесено к году, за который его нет в таблицах и фактах) и
+  `numeric_claim_contradicts_table` (для метрики и года в таблице другое
+  значение). Проверка «темп роста» сверяет процент из ответа с расчётом по
+  фактам двух лет (`growth_rate_mismatch`). Все три — `fatal`: ответ уходит
+  на повторную генерацию, а при неудаче — в abstain, а не в уверенную ошибку.
+  Справочник значений (`metrics_reference`) передаётся в промпт, а таблицы-чанки
+  добавляются в evidence, чтобы на них можно было сослаться.
 - 2015 год — отчёт БПС-Сбербанка (Беларусь); он помечен в реестре как
   несопоставимый и не должен попадать в сравнения по умолчанию.
 
@@ -631,18 +663,39 @@ python scripts/verify_corpus.py
 python scripts/build_indexes.py --dry-run
 python scripts/build_indexes.py
 python scripts/build_indexes.py --reuse-cache-only   # только из готового кэша
+
+# Большой корпус: чекпоинты и pacing под RPM провайдера
+python scripts/reindex_embeddings.py
+python scripts/build_indexes.py --reuse-cache-only
 ```
 
-Нужны `EMBED_MODEL` и `LLM_API_KEY` (кроме `--reuse-cache-only` при готовом
-кэше). Без `faiss-cpu` используется in-memory `DenseIndex`.
+`build_indexes.py` считает эмбеддинги одним проходом и пишет кэш только в конце,
+поэтому на большом корпусе после 429/обрыва теряется вся работа.
+`reindex_embeddings.py` режет запросы по лимиту payload, выдерживает паузу под
+RPM и сохраняет `*.partial.json`: после сбоя команду можно просто перезапустить.
+
+Нужны `EMBED_MODEL` и ключ эмбеддингов (`EMBED_API_KEY` или `LLM_API_KEY`; кроме
+`--reuse-cache-only` при готовом кэше). Без `faiss-cpu` используется in-memory
+`DenseIndex`.
 
 ### Граф
 
 ```powershell
 # dry-run: сколько батчей нужно, без вызовов LLM
 python scripts/build_full_graph.py --dry-run
-python scripts/build_full_graph.py --workers 3
-python scripts/build_full_graph.py --doc sber_2023 --limit 200
+
+# Полная сборка на Cloud: 8 чанков за вызов, 16k вывода, 8-16 воркеров
+python scripts/run_graph_full.py --provider cloud --model "Qwen/Qwen3.6-35B-A3B" `
+  --chunks-per-call 8 --max-completion-tokens 16384 --workers 16
+
+# Точечные прогоны
+python scripts/build_full_graph.py --doc sber_2023 --limit 200 --workers 8
+python scripts/build_full_graph.py --doc sber_2023 --limit 200 `
+  --chunks-per-call 8 --workers 8
+
+# Бесплатный тариф NeuralDeep: раннер сам ждёт окна квоты и продолжает с чекпоинта
+python scripts/run_graph_full.py --provider neuraldeep --model qwen3.6-35b-a3b-noreason `
+  --chunks-per-call 12 --max-completion-tokens 8192 --workers 3
 
 # Добор только failed-чанков после сбоя/лимита
 python scripts/patch_graph_failed_chunks.py `
@@ -652,6 +705,13 @@ python scripts/patch_graph_failed_chunks.py `
 python scripts/build_graph_dev.py --limit 200
 python scripts/compare_graph_dev.py --questions questions.txt
 ```
+
+Извлечение переиспользуется из чекпоинта **по `chunk_id`**, поэтому добавление
+новых отчётов не требует повторных вызовов LLM для старых чанков. В чекпоинте
+фиксируется модель: при смене `--model` старые записи игнорируются, и граф
+считается заново. Крупные пакеты (8+ чанков) требуют лимита вывода ≥16384
+токенов, иначе JSON обрезается и пакет уходит в failed
+(`GRAPH_MAX_COMPLETION_TOKENS`).
 
 Активным считается только артефакт с `status=complete`; среди полных
 выбирается самый покрытый, затем самый свежий.
@@ -691,18 +751,22 @@ powershell -ExecutionPolicy Bypass -File scripts\dev_ui.ps1
 powershell -ExecutionPolicy Bypass -File scripts\dev_ui.ps1 -EvalUi
 ```
 
-### Проверка Cloud.ru API
+### Проверка внешнего API
 
 ```powershell
 python scripts/check_llm_access.py
 python -m scripts.smoke_api --live
+python scripts/check_embedding_compat.py
 ```
 
 `check_llm_access.py` раздельно проверяет `models.list`, chat и embeddings и
-печатает UUID проекта из ключа (без секрета). Это позволяет отличить «ключ
-неверный» (`400 invalid api key secret`) от «проект ключа недоступен»
-(`403 Project not found`). `smoke_api` — smoke-тест внешнего LLM/embeddings
-API, а не HTTP API проекта.
+печатает UUID проекта из ключа (без секрета). Chat и `models.list` идут через
+`LLM_BASE_URL`, embeddings — через `EMBED_BASE_URL`, если он задан. Это
+позволяет отличить «ключ неверный» (`400 invalid api key secret`) от «проект
+ключа недоступен» (`403 Project not found`). `smoke_api` — smoke-тест внешнего
+LLM/embeddings API, а не HTTP API проекта. `check_embedding_compat.py` считает
+векторы нового эмбеддера для сэмпла чанков и сравнивает косинус с готовым
+кэшем: так решается, переиспользовать кэш или переиндексировать корпус.
 
 ---
 
@@ -723,6 +787,11 @@ python -m eval.runner --suite smoke --split dev --limit 12 --no-judge
 # Полный прогон 30 тестов, включая holdout
 python -m eval.runner --suite full --no-judge
 
+# Бенчмарк по полному корпусу (30 тестов, 10 отчётов): пересобрать эталон и прогнать
+python scripts/build_benchmark_full.py
+python -m eval.runner --datasets eval/datasets/full --chunks data/chunks `
+  --suite full --fresh-service --output-dir eval/results/full-$(Get-Date -Format yyyy-MM-dd)
+```
 # Отдельные режимы retrieval
 python -m eval.runner --suite smoke --retrieval-mode dense --no-judge
 python -m eval.runner --suite smoke --retrieval-mode all --no-judge
@@ -765,7 +834,63 @@ abstain 1/1, structural 2/2, temporal 2/4, dialogue 3/5, multi_hop 0/3.
   считается частично (`not_measured`), это видно в `limitations` summary.
 
 `pass_rate 0.767` — результат на dev-корпусе из 1025 чанков, а не на полном
-корпусе 9 PDF. Per-test стабильность не измерялась (`repeat=1`).
+корпусе 10 PDF. Per-test стабильность не измерялась (`repeat=1`).
+
+### Бенчмарк по полному корпусу
+
+`eval/datasets/full/` — отдельный набор из 30 тестов, привязанный к полному
+корпусу (10 отчётов, 13 969 чанков). Вопросы составлены по текстам отчётов;
+`scripts/build_benchmark_full.py` проверяет каждый эталон: gold-чанк существует,
+ожидаемое число дословно есть в его тексте, год и документ совпадают с фильтрами.
+Gold-группа принимает любой чанк того же документа и года с этим числом, потому
+что показатель в отчёте повторяется в обзоре, таблице и примечаниях.
+
+Состав: 12 easy (чистая прибыль 2016–2025, ROE, дивиденды), 8 medium
+(сравнения по годам, прибыль/ROE 2016→2023, дивиденды, клиенты), 8 hard
+(abstain по отсутствующему 2021 году, сравнения через пропущенные годы,
+2015 — БПС-Сбербанк), 2 multi-turn (перенос метрики на следующий год).
+12 smoke, 7 holdout.
+
+Последний прогон (`eval/results/full-2026-11-16-v2/20261116_154358_ea7a45b/`,
+Cloud, `--no-judge`):
+
+| Метрика | Значение |
+|---|---:|
+| Pass rate / Pass@1 | **73,3%** (22/30) |
+| Fact accuracy | 92,9% |
+| Citation validity | 100% |
+| Citation coverage | 92,9% |
+| Status accuracy | 98,3% |
+| Abstention accuracy | 100% |
+| Retrieval Recall@5 | 0,702 |
+| Retrieval MRR | 0,607 |
+| Evidence / context coverage | 0,827 / 0,774 |
+
+Разбивка: easy **12/12**, medium 5/8, hard 5/8, multi-turn 0/2; holdout **7/7**,
+dev 15/23. По категориям: fact_lookup **18/18**, abstain **2/2**,
+multi_hop 2/5, temporal 0/3, dialogue 0/2.
+
+Известные дефекты, которые видны на этом прогоне:
+
+- `medium_001` (прибыль 2019→2020): за 2020 год названо **831,7** млрд — это
+  значение 2018 года;
+- `medium_002` (прибыль 2023→2025): оба значения верные, но темп роста назван
+  «7,9%» (это 2025 к 2024), фактически +13,1%;
+- диалог без фильтров («Какая чистая прибыль у Сбербанка за 2025 год?») может
+  уйти в смежную метрику: в multi-turn прогоне ответ был про чистые процентные
+  доходы, а на вопрос про ROE — про кредиты B2B/B2C. При прямом вопросе с
+  фильтрами года ответ корректный;
+- `hard_003`, `hard_004`, `hard_006`: ответы по числам верные, но gold-чанки
+  не попали в top-5 → срабатывает `evidence_coverage_below_min`
+  (`citation_quote_mismatch` — цитаты в ответе перефразированы).
+
+Воспроизвести:
+
+```powershell
+python scripts/build_benchmark_full.py          # пересобрать и проверить эталон
+python -m eval.runner --datasets eval/datasets/full --chunks data/chunks `
+  --suite full --output-dir eval/results/full-$(Get-Date -Format yyyy-MM-dd)
+```
 
 ### Evaluation WebUI
 
@@ -793,7 +918,7 @@ openspec validate --all --strict
 
 Результаты на 15.11.2026 (Python 3.11.9, `.venv`):
 
-- backend — `854 passed`;
+- backend — `863 passed`;
 - frontend unit — `160 passed` в 24 файлах Vitest;
 - Playwright E2E — `7/7` (5 сценариев чата + 2 сценария Evaluation) против
   fixture-backend на изолированных портах (API 8010, UI 5273);
@@ -828,7 +953,7 @@ frontend/      React + TypeScript WebUI + Evaluation UI + Vitest/Playwright
 scripts/       сборка корпуса/графа/FAISS-индекса, проверки, dev-вопросы,
                приёмка, smoke API
 tests/         офлайновые unit/интеграционные тесты
-data/          исходные PDF и производные артефакты (2015–2018 + dev-корпус)
+data/          исходные PDF и производные артефакты (10 отчётов, 2015–2020, 2022–2025)
 docs/specs/    спецификации React WebUI и Evaluation WebUI
 openspec/      OpenSpec context и change add-pdf-parser
 ```
@@ -838,23 +963,22 @@ openspec/      OpenSpec context и change add-pdf-parser
 ## Ограничения
 
 - Для ответов, эмбеддингов и LLM-реранкера нужен доступ к Cloud.ru API.
-- Полный корпус 9 PDF не собран: канонические артефакты есть для 2015–2018,
-  документы 2019–2024 не парсились. Чат и benchmark работают на dev-корпусе из
-  4 документов (1025 чанков). Нельзя считать проект готовым к демонстрации на
-  полном корпусе до завершения парсинга и `verify_corpus.py` без ошибок.
+- Полный корпус 10 PDF спарсен (`verify_corpus.py`: 10/10, 13969 чанка, 0 ошибок),
+  но embeddings/FAISS и graph для новых 10041 чанков ещё не собраны: нужен
+  Cloud.ru API. Чат и benchmark по-прежнему работают на dev-корпусе из 4
+  документов (1025 чанков), поэтому 23–24/30 нельзя переносить на полный корпус.
 - FAISS-индекс не входит в git (как и `data/`): его нужно собрать командой
   `python scripts/build_indexes.py`. Без артефакта фабрика считает эмбеддинги
   и строит индекс при первом запуске; при отсутствии `faiss-cpu` используется
   in-memory fallback.
-- Полный graph index собран частично: 1916/3928 чанков, артефакт
-  `b288dd3c…` имеет `status=incomplete` (2012 чанков 2017–2018 упали на 403
-  Cloud.ru), поэтому используется dev-граф `a8ce50f6…` (536 чанков,
-  2022–2023, 163 раздела). Базовые и графовые кандидаты проходят общий
-  rerank, активен
-  только артефакт со `status=complete`.
+- Полный graph index собран частично: 1916/3928 чанков старого canonical-
+  корпуса, артефакт `b288dd3c…` имеет `status=incomplete` (2012 чанков
+  2017–2018 упали на 403 Cloud.ru). Для новых 10041 чанков graph не строился.
+  Используется dev-граф `a8ce50f6…` (536 чанков, 2022–2023, 163 раздела);
+  активен только артефакт со `status=complete`.
 - Benchmark: последний полный прогон 30 тестов — 23/30 (`pass_rate 0.767`) на
   dev-корпусе; предыдущий — 24/30. `expected_corpus_sha256` привязан к
-  dev-корпусу, а не к полному из 9 PDF. Holdout пересекается с dev по
+  dev-корпусу, а не к полному из 10 PDF. Holdout пересекается с dev по
   gold-чанкам в 4 тестах; per-test стабильность не измерялась.
 - Judge-калибровка на размеченных ответах не выполнена; judge выключен по
   умолчанию (`EVAL_JUDGE_ENABLED=0`).

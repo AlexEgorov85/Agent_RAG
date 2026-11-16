@@ -5,8 +5,10 @@ from __future__ import annotations
 import difflib
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from typing import Any
+
+from src.core.text import bounded_edit_distance
+from src.retrieval.contracts import RerankResult
 
 
 MAX_CANDIDATES = 10
@@ -16,16 +18,6 @@ MAX_COMPLETION_TOKENS = 512
 
 #: Меньшие запросы снижают риск, что модель пропустит или исказит ``chunk_id``.
 DEFAULT_RERANK_BATCH_SIZE = 5
-
-
-@dataclass(frozen=True)
-class RerankResult:
-    """Переранжированные хиты и диагностика использования fallback на RRF."""
-
-    hits: list[dict[str, Any]]
-    used_fallback: bool
-    attempts: int
-    warning: str | None = None
 
 
 def _chunk_id(hit: Mapping[str, Any]) -> str:
@@ -42,21 +34,7 @@ def _chunk_id(hit: Mapping[str, Any]) -> str:
 
 def _edit_distance(left: str, right: str) -> int:
     """Ограниченное расстояние Левенштейна для опечаток в один символ."""
-    if left == right:
-        return 0
-    if abs(len(left) - len(right)) > 1:
-        return 2
-    previous = list(range(len(right) + 1))
-    for row, left_char in enumerate(left, start=1):
-        current = [row]
-        for column, right_char in enumerate(right, start=1):
-            current.append(min(
-                current[-1] + 1,
-                previous[column] + 1,
-                previous[column - 1] + (left_char != right_char),
-            ))
-        previous = current
-    return previous[-1]
+    return bounded_edit_distance(left, right)
 
 
 def _resolve_candidate_id(chunk_id: str, candidate_ids: Sequence[str]) -> str:

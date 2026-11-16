@@ -11,13 +11,14 @@ REAL_NAMES = [
     "Копия Сбер 2015.pdf", "Копия Сбер 2016.pdf", "Копия Сбер 2017.pdf",
     "Копия Сбер 2018.pdf", "Копия Сбер 2019.pdf", "Копия Сбер 2020.pdf",
     "Копия Сбер 2022.pdf", "Копия Сбер 2023.pdf", "Копия Сбер 2024.pdf",
+    "Копия Сбер 2025.pdf",
 ]
 
 
-def test_all_nine_real_files_have_unique_doc_ids():
+def test_all_real_files_have_unique_doc_ids():
     doc_ids = [make_doc_id(n) for n in REAL_NAMES]
-    assert len(set(doc_ids)) == 9
-    assert doc_ids == [f"sber_{y}" for y in (2015, 2016, 2017, 2018, 2019, 2020, 2022, 2023, 2024)]
+    assert len(set(doc_ids)) == 10
+    assert doc_ids == [f"sber_{y}" for y in (2015, 2016, 2017, 2018, 2019, 2020, 2022, 2023, 2024, 2025)]
     assert "sber_2021" not in doc_ids  # 2021 в корпусе отсутствует физически
 
 

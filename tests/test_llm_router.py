@@ -135,6 +135,26 @@ def test_invalid_json_falls_back_to_deterministic_plan() -> None:
     assert plan.answer_mode == "concise"
 
 
+def test_llm_years_adjacent_to_corpus_are_ignored() -> None:
+    client = FakeClient(
+        {
+            "intent": "temporal",
+            "years": [2018, 2025],
+            "answer_mode": "comparison",
+        }
+    )
+    router = LLMRouter(
+        client,
+        "fake",
+        YEARS,
+        fallback=SimpleRouter(YEARS),
+    )
+
+    plan = router.analyze("Покажи показатели", SearchFilters())
+
+    assert plan.years == []
+
+
 def test_llm_years_outside_corpus_window_are_ignored() -> None:
     client = FakeClient(
         {

@@ -12,8 +12,9 @@
 Помимо сущностного канала (`MENTIONS`/`RELATED_TO`) обёртка умеет структурное
 расширение: верхние базовые хиты дополняются соседями по разделу (`CONTAINS`) и
 по странице — не больше ``structure_budget`` на сид. Такие кандидаты получают
-``graph_score=STRUCTURE_GRAPH_SCORE`` (ниже любой сущностной находки), поэтому
-могут лишь пополнить пул перед реранжированием, но не вытеснить доказанное.
+``graph_score=STRUCTURE_GRAPH_SCORE`` (ниже сущностных находок на типичной
+глубине обхода), поэтому могут лишь пополнить пул перед реранжированием, но при
+настройках по умолчанию не вытесняют доказанное.
 
 Поддерживаются две политики отбора:
 
@@ -66,6 +67,8 @@ from typing import Any
 
 import networkx as nx
 
+from src.core.introspection import supports_keyword
+from src.core.record import nested_field_value as _field
 from src.graph.graph_models import GraphRetrievalResult
 from src.retrieval.bm25 import tokenize as _tokenize
 from src.retrieval.graph_retriever import (
@@ -86,9 +89,10 @@ from src.retrieval.reranker import MAX_CANDIDATES as RERANKER_MAX_CANDIDATES
 #: ``DEFAULT_RELEVANCE_THRESHOLD`` считается релевантным свидетельством.
 DEFAULT_RELEVANCE_THRESHOLD = 2
 
-#: Графовый скор структурных соседей. Ниже любой сущностной находки
-#: (прямое упоминание — 1.0, глубина 1 — 0.5, глубина 2 — 0.33), поэтому
-#: структурный кандидат никогда не вытесняет доказанный сущностный.
+#: Графовый скор структурных соседей. Ниже сущностных находок на глубине
+#: обхода ≤3 (прямое упоминание — 1.0, глубина 1 — 0.5, глубина 2 — 0.33),
+#: поэтому при настройках по умолчанию структурный кандидат не вытесняет
+#: доказанный сущностный. При ``graph_depth >= 4`` это уже не гарантируется.
 STRUCTURE_GRAPH_SCORE = 0.25
 
 #: ``entity_matcher(query, graph)`` или короткая форма ``entity_matcher(query)``.
@@ -104,11 +108,6 @@ GENERIC_ENTITY_NAMES = frozenset({
     "рынок", "рынка", "рынке", "отчет", "отчета", "год", "года", "году",
 })
 MIN_ENTITY_NAME_LENGTH = 3
-
-
-def normalize_entity_text(value: Any) -> str:
-    """Приводит текст к нижнему регистру и схлопывает пробелы для сопоставления имён."""
-    return " ".join(str(value).split()).casefold()
 
 
 def _lemma_text(value: Any) -> str:
@@ -268,22 +267,6 @@ def _copy_trace(base_trace: Any) -> GraphRetrievalTrace:
     return trace
 
 
-def _accepts_keyword(target: Any, keyword: str) -> bool:
-    """Проверяет, принимает ли ``target`` именованный аргумент ``keyword``."""
-    try:
-        parameters = inspect.signature(target).parameters
-    except (TypeError, ValueError):
-        return False
-    return any(
-        item.kind == inspect.Parameter.VAR_KEYWORD
-        or (
-            item.name == keyword
-            and item.kind != inspect.Parameter.POSITIONAL_ONLY
-        )
-        for item in parameters.values()
-    )
-
-
 def _result_field(result: Any, name: str, default: Any = None) -> Any:
     """Читает поле результата поиска из объекта или словаря."""
     if isinstance(result, Mapping):
@@ -359,16 +342,6 @@ def _as_hit(item: Any) -> RetrievalHit:
         rerank_score=getattr(item, "rerank_score", None),
         rerank_rank=getattr(item, "rerank_rank", None),
     )
-
-
-def _field(chunk: Mapping[str, Any], name: str) -> Any:
-    """Читает поле чанка, при необходимости из его ``metadata``."""
-    if name in chunk:
-        return chunk[name]
-    metadata = chunk.get("metadata")
-    if isinstance(metadata, Mapping):
-        return metadata.get(name)
-    return None
 
 
 def _passes_extra_filters(chunk: Mapping[str, Any], filters: SearchFilters) -> bool:
@@ -548,8 +521,8 @@ class GraphAugmentedRetriever:
         else:
             self.base_candidate_k = int(base_candidate_k)
         base_retrieve = getattr(base, "retrieve", None)
-        self._base_accepts_mode = _accepts_keyword(base_retrieve, "retrieval_mode")
-        self._base_accepts_queries = _accepts_keyword(base_retrieve, "queries")
+        self._base_accepts_mode = supports_keyword(base_retrieve, "retrieval_mode")
+        self._base_accepts_queries = supports_keyword(base_retrieve, "queries")
 
     def _graph_is_empty(self) -> bool:
         """Отличает отсутствующий/пустой граф от сломанного backend'а."""
@@ -692,7 +665,7 @@ class GraphAugmentedRetriever:
         return results
 
     def _structure_path(self, seed: str, neighbour: str) -> tuple[str, ...]:
-        """Путь-объяснение: сид → общий раздел (если есть) → сосед."""
+        """Путь-объяснение: сид → его разделы-предки в графе → сосед."""
         seed_node = f"chunk:{seed}"
         sections = sorted(
             parent for parent in self.graph.predecessors(seed_node)
@@ -849,8 +822,11 @@ class GraphAugmentedRetriever:
         retrieval_mode: str = "hybrid",
         queries: Sequence[str] | None = None,
     ) -> RetrievalResult:
-        """Возвращает базовые хиты, за которыми идут новые графовые чанки-свидетельства.
+        """Возвращает объединённый пул базовых и графовых хитов.
 
+        Без реранкера базовые хиты идут первыми, новые графовые — после них.
+        С реранкером порядок задаёт ``rerank_score``, поэтому графовый хит может
+        оказаться выше базового и вытеснить его по ``top_k``.
         ``retrieval_mode``/``queries`` пробрасываются в базовый retriever, если
         он их поддерживает. Граф работает только поверх ``hybrid``: в
         ``dense``/``keyword`` этап отключается с ``mode_not_supported``.

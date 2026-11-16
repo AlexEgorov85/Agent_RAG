@@ -237,7 +237,7 @@ def test_bps_issuer_is_rejected_for_other_years(project: Path) -> None:
 
 def test_target_years_completeness_is_checked(project: Path) -> None:
     records = []
-    for year in (2015, 2016, 2017, 2018, 2019, 2020, 2022, 2023, 2024):
+    for year in (2015, 2016, 2017, 2018, 2019, 2020, 2022, 2023, 2024, 2025):
         doc_id = f"sber_{year}"
         record = make_record(project, doc_id)
         if year == 2015:
@@ -258,7 +258,7 @@ def test_target_years_completeness_is_checked(project: Path) -> None:
     incomplete = validate_registry(
         records[:-1], project_root=project, verify_sha256=False)
     assert "missing_corpus_year" in codes(incomplete)
-    assert any(issue.doc_id == "sber_2024" for issue in incomplete.errors)
+    assert any(issue.doc_id == "sber_2025" for issue in incomplete.errors)
 
     relaxed = validate_registry(
         records[:-1], project_root=project, verify_sha256=False,

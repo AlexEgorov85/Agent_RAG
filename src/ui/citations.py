@@ -7,13 +7,13 @@ from collections.abc import Mapping
 from typing import Any
 from urllib.parse import quote
 
+from src.core.record import field_value
+
 DEFAULT_API_BASE_URL = "http://127.0.0.1:8000"
 
 
 def _value(item: Any, key: str, default: Any = None) -> Any:
-    if isinstance(item, Mapping):
-        return item.get(key, default)
-    return getattr(item, key, default)
+    return field_value(item, key, default)
 
 
 def api_base_url(environ: Mapping[str, str] | None = None) -> str:

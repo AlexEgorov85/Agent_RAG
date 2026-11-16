@@ -37,8 +37,8 @@
 - Реализованы: PDF parser (hi_res/fast, OCR, батчи, resume по SHA-256 и подписи
   параметров), outline reader, structure builder (закладки → TOC → эвристика),
   chunk builder/enricher, CLI, реестр источников и скрипты сборки/валидации
-  корпуса. Канонические артефакты готовы для 2015–2018: 3928 чанков, 98% со
-  структурой. Документы 2019–2024 не парсились.
+  корпуса. Канонические артефакты готовы для всех 10 документов: 13969 чанка,
+  98.4% со структурой; 2021 отсутствует.
 - Реализованы: embeddings/indexes, BM25/hybrid retrieval, RRF, reranker, query
   rewriting, diversity, graph builder/retriever, graph-augmented поиск.
   Dense-индекс — постоянный FAISS `IndexFlatIP` (`data/indexes/{fingerprint}/`),
@@ -62,7 +62,7 @@
   report, cancel, compare) и React-раздел `/evaluation` (обзор, запуски, тесты,
   сравнение) с навигацией чат↔Evaluation. Раздел выключен по умолчанию
   (`EVAL_UI_ENABLED=0`), прогресс — polling, SSE-канала нет.
-- Тесты: полный `pytest` — `854 passed` в `.venv` (Python 3.11.9, снимок
+- Тесты: полный `pytest` — `863 passed` в `.venv` (Python 3.11.9, снимок
   15.11.2026), frontend — `160 passed` в 24 файлах Vitest, Playwright E2E —
   `7/7` (5 чат + 2 Evaluation); `tsc -b` проходит,
   `openspec validate --all --strict` проходит.
@@ -77,8 +77,8 @@
   (`eval/results/20261115_174124_0a97989/`), per-test стабильность не доказана
   (`repeat=1`). В последнем прогоне есть `holdout_gold_overlap` в 4 тестах, а
   `context_chunk_ids` доступны не для всех кейсов.
-- Не завершены: полный корпус из 9 PDF (2019–2024 не парсились), полный graph
-  index (`b288dd3c…` — 1916/3928, `status=incomplete`), прогон benchmark на
+- Не завершены: embeddings/FAISS для новых 10041 чанков, полный graph index
+  (`b288dd3c…` — 1916/3928, `status=incomplete`), прогон benchmark на
   полном корпусе и `expected_corpus_sha256` для него, judge-калибровка и
   опциональный Evaluation SSE; issuer-фильтр и изоляция 2015 реализованы.
 - Имеются raw PDF; `data/` игнорируется Git. Не считать полный корпус или
@@ -99,13 +99,13 @@ src/api/        — FastAPI adapter: чат/SSE/evidence + Evaluation API
 src/ui/         — Streamlit app, citations, structure, graph, timeline
 frontend/       — React + TypeScript WebUI (этапы 1–4, часть 5 + Evaluation UI)
 eval/           — dataset, metrics, judge, reproducible runner
-data/           — raw/ (9 PDF, только чтение), elements/ (артефакты парсера), figures/ (вырезы Image hi_res по doc_id), chunks/, structure/, cache/, graph/
+data/           — raw/ (10 PDF, только чтение), elements/ (артефакты парсера), figures/ (вырезы Image hi_res по doc_id), chunks/, structure/, cache/, graph/
 scripts/        — сборка корпуса/графа, проверки, dev-вопросы, smoke-тесты API
 ```
 
 ## Data
 
-- `data/raw/Копия Сбер {2015–2020, 2022–2024}.pdf` (9 файлов, ~168 МБ, 2021 отсутствует физически)
+- `data/raw/Копия Сбер {2015–2020, 2022–2025}.pdf` (9 файлов, ~168 МБ, 2021 отсутствует физически)
 - Тест-контроль качества парсинга: полный отчёт 2015 (74 страницы) — 1143 элемента
   (421 NarrativeText, 279 Text, 133 ListItem, 103 Image, 100 Title, 70 Header, 25 Table, 12 FigureCaption)
 

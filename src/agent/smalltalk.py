@@ -196,13 +196,15 @@ def _normalize(text: str) -> str:
 
 
 def _is_capability_question(normalized: str) -> bool:
+    # Предметная лексика важнее местоимения/глагола: «ты умеешь считать
+    # выручку?» — вопрос по корпусу, а не о возможностях ассистента.
+    if any(marker in normalized for marker in _DOMAIN_MARKERS):
+        return False
     words = set(normalized.split())
-    if "умеешь" in words or "умеешь" in normalized:
+    if "умеешь" in normalized:
         return True
     if normalized in {"помощь", "help"} or normalized in _CAPABILITY_SHORT_FORMS:
         return True
-    if any(marker in normalized for marker in _DOMAIN_MARKERS):
-        return False
     if any(phrase in normalized for phrase in _CAPABILITIES):
         return True
     if not words & _SECOND_PERSON:

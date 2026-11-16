@@ -296,6 +296,7 @@ class StructureAnalyzer:
         snapshots: Mapping[int, Sequence[Mapping[str, Any]]],
         years: Sequence[int] | None = None,
     ) -> dict[str, list[dict[str, Any]]]:
+        """Сопоставить snapshots разделов и вернуть изменения."""
         ordered = sorted(years or snapshots)
         ordered = [year for year in ordered if year in snapshots]
         matches: list[dict[str, Any]] = []

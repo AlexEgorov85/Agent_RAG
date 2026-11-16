@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import json
-import math
 import warnings
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import datetime, timezone

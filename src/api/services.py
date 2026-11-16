@@ -57,11 +57,13 @@ class AgentProvider:
         self._retry_after_s = max(0.0, float(retry_after_s))
 
     def set_service(self, service: Any) -> None:
+        """Внедрить готовый сервис."""
         with self._lock:
             self._service = service
             self._failed_until = 0.0
 
     def get(self) -> Any:
+        """Лениво создать/вернуть ``AgentService``."""
         with self._lock:
             if self._service is not None:
                 return self._service
@@ -82,6 +84,7 @@ class AgentProvider:
             return self._service
 
     def available(self) -> bool:
+        """Доступен ли backend без создания сервиса."""
         try:
             self.get()
         except BackendUnavailable:
@@ -96,17 +99,21 @@ class StaticAgentProvider:
         self.service = service
 
     def get(self) -> Any:
+        """Вернуть внедрённый сервис."""
         return self.service
 
     def set_service(self, service: Any) -> None:
+        """Заменить внедрённый сервис."""
         self.service = service
 
     def available(self) -> bool:
+        """Всегда ``True`` для внедрённого сервиса."""
         return self.service is not None
 
 
 @dataclass(frozen=True)
 class CorpusInfo:
+    """Публичное описание корпуса."""
     name: str = "Локальный корпус"
     years: list[int] = field(default_factory=list)
     documents: list[dict[str, Any]] = field(default_factory=list)
@@ -114,6 +121,7 @@ class CorpusInfo:
     years_available: bool = False
 
     def to_public(self) -> dict[str, Any]:
+        """Словарь для ``/api/corpus``."""
         return {
             "name": self.name,
             "years": list(self.years),
@@ -230,11 +238,9 @@ class Services:
         self.agent_provider.get()
         return self._evaluation_gate
 
-    def set_agent(self, service: Any) -> None:
-        self.agent_provider.set_service(service)
-
     @property
     def corpus(self) -> CorpusInfo:
+        """Кэшированное описание корпуса."""
         with self._corpus_lock:
             if self._corpus is None:
                 self._corpus = build_corpus_info(self.agent, self.config)
@@ -295,6 +301,7 @@ class Services:
             return False
 
     def capabilities(self) -> dict[str, Any]:
+        """Флаги возможностей API."""
         capabilities = dict(CAPABILITIES)
         capabilities["retrieval_modes"] = list(self.config.capabilities_modes())
         # PDF-ссылки включаются только при валидном реестре и доступном файле.
@@ -311,6 +318,7 @@ class Services:
         return capabilities
 
     def rate_limited(self, owner_id: str) -> bool:
+        """Проверить лимит запросов владельца."""
         limit = self.config.rate_limit_per_minute
         if limit <= 0:
             return False

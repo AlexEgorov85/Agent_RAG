@@ -149,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
     from src.core.cache import cached_document_vectors
     from src.core.corpus import load_chunks
     from src.core.dense_index import DenseIndex
-    from src.core.embeddings import CourseEmbeddings
+    from src.core.embeddings import ReportEmbeddings, make_embeddings_client
     from src.engine.context import pack_context
     from src.graph.graph_builder import load_graph
     from src.retrieval.bm25 import BM25Index
@@ -171,8 +171,9 @@ def main(argv: list[str] | None = None) -> int:
     from openai import OpenAI
 
     client = OpenAI(api_key=api_key, base_url=base_url, timeout=90, max_retries=2)
-    embeddings = CourseEmbeddings(
-        client,
+    embed_client = make_embeddings_client(fallback_client=client)
+    embeddings = ReportEmbeddings(
+        embed_client,
         os.getenv("EMBED_MODEL", "ai-sage/Giga-Embeddings-instruct-3B"),
         os.getenv("EMBED_QUERY_PREFIX", "query:"),
     )

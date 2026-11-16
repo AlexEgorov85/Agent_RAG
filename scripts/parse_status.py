@@ -26,8 +26,9 @@ DOCS = [
     "sber_2022",
     "sber_2023",
     "sber_2024",
+    "sber_2025",
 ]
-TARGETS = ["sber_2019", "sber_2020", "sber_2022", "sber_2023", "sber_2024"]
+TARGETS = ["sber_2019", "sber_2020", "sber_2022", "sber_2023", "sber_2024", "sber_2025"]
 STATE_PATH = PROJECT / "logs" / "parse_status_state.json"
 
 
@@ -37,12 +38,21 @@ def _pages() -> dict[str, int]:
             (PROJECT / "data" / "corpus_report.json").read_text(encoding="utf-8")
         )
     except (OSError, json.JSONDecodeError):
-        return {}
-    return {
+        payload = {}
+    result = {
         str(item.get("doc_id")): int(item.get("n_pages") or 0)
         for item in payload.get("documents", [])
         if isinstance(item, dict)
     }
+    if not result.get("sber_2025"):
+        try:
+            from pypdf import PdfReader
+
+            pdf = PROJECT / "data" / "raw" / "Копия Сбер 2025.pdf"
+            result["sber_2025"] = len(PdfReader(str(pdf)).pages)
+        except Exception:  # noqa: BLE001 - статус не должен падать из-за PDF
+            result.setdefault("sber_2025", 0)
+    return result
 
 
 def _is_chunks(doc_id: str) -> bool:
@@ -151,7 +161,7 @@ def main() -> int:
     print(f"# Парсинг — {now.strftime('%H:%M')}")
     if process is None:
         print("Активный парсер не найден.")
-        print(f"Готово: {len(done)}/9 документов, {done_pages}/{total_pages} страниц.")
+        print(f"Готово: {len(done)}/{len(DOCS)} документов, {done_pages}/{total_pages} страниц.")
         _save_state(None, None)
         return 0
 
@@ -198,7 +208,7 @@ def main() -> int:
     print(
         f"Всего: {parsed_pages}/{total_pages} стр. "
         f"({parsed_pages * 100 / total_pages:.0f}%) | "
-        f"готово {len(done)}/9 документов"
+        f"готово {len(done)}/{len(DOCS)} документов"
     )
     remaining = [item for item in TARGETS if not _is_chunks(item)]
     remaining_pages = sum(

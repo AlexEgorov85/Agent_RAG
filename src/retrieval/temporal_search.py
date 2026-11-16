@@ -8,12 +8,12 @@
 
 from __future__ import annotations
 
-import inspect
 import re
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 
+from src.core.introspection import supports_keyword
 from src.retrieval.hybrid_retriever import (
     RetrievalResult,
     RetrievalTrace,
@@ -31,21 +31,6 @@ _METRIC_WORDS = (
     "расход",
     "маржа",
 )
-
-
-def _supports_keyword(target: Any, keyword: str) -> bool:
-    try:
-        parameters = inspect.signature(target).parameters.values()
-    except (TypeError, ValueError):
-        return False
-    return any(
-        item.kind == inspect.Parameter.VAR_KEYWORD
-        or (
-            item.name == keyword
-            and item.kind != inspect.Parameter.POSITIONAL_ONLY
-        )
-        for item in parameters
-    )
 
 
 def _hit_id(hit: Any) -> str | None:
@@ -107,12 +92,12 @@ class PerYearSearch:
         }
         self.noncomparable_doc_ids = frozenset(noncomparable_doc_ids or ())
         retrieve = getattr(retriever, "retrieve", None)
-        self._supports_reranker_flag = _supports_keyword(
+        self._supports_reranker_flag = supports_keyword(
             retrieve, "use_reranker"
         )
-        self._supports_top_k = _supports_keyword(retrieve, "top_k")
-        self._supports_mode = _supports_keyword(retrieve, "retrieval_mode")
-        self._supports_queries = _supports_keyword(retrieve, "queries")
+        self._supports_top_k = supports_keyword(retrieve, "top_k")
+        self._supports_mode = supports_keyword(retrieve, "retrieval_mode")
+        self._supports_queries = supports_keyword(retrieve, "queries")
 
     def __getattr__(self, name: str) -> Any:
         # Сохраняем доступ к .reranker/.top_k и другим полям обёрнутого retriever.
@@ -228,9 +213,9 @@ class PerYearSearch:
     ) -> RetrievalResult:
         """Веерный поиск; ``rerank_per_year`` переопределяет настройку на вызов.
 
-        ``False`` по умолчанию экономит вызовы реранкера, ``True`` включает
-        реранкер для каждого года (сравнение per-year идёт без него). ``None``
-        означает «как сконфигурировано в конструкторе».
+        ``True`` включает реранкер для каждого года, ``False`` отключает его.
+        ``None`` — для веерного поиска использовать настройку конструктора, а
+        одиночный поиск (без запрошенных лет) выполнять с реранкером.
         """
         effective = (filters or SearchFilters()).normalized()
         requested = sorted(effective.requested_years())

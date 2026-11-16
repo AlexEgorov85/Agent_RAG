@@ -10,6 +10,9 @@ import re
 from dataclasses import replace
 from typing import Any, Mapping
 
+from src.core.record import chunk_text as _chunk_text
+from src.core.record import chunk_year as _chunk_year
+
 from src.agent.coverage import (
     CoverageCell,
     CoverageReport,
@@ -23,7 +26,6 @@ from src.retrieval.hybrid_retriever import SearchFilters
 
 DEFAULT_MAX_SEARCHES = 2
 DEFAULT_MAX_STRUCTURE_DOCS = 5
-DEFAULT_MAX_CONTENT_SEARCHES = 5
 #: Для сравнения без числовых метрик каждый год ищется отдельно и с запасом
 #: top-k: иначе RRF/разнообразие внутри года вытесняют нужный раздел.
 COMPARISON_TOP_K = 10
@@ -263,12 +265,6 @@ def _phrase_in_text(label: str, text: str) -> bool:
     return False
 
 
-def _chunk_text(chunk: Any) -> str:
-    if isinstance(chunk, Mapping):
-        return f"{chunk.get('text') or ''} {chunk.get('html') or ''}"
-    return f"{getattr(chunk, 'text', '') or ''} {getattr(chunk, 'html', '') or ''}"
-
-
 def _label_in_evidence(
     label: str, evidence: Mapping[str, Any], *, year: int | None = None
 ) -> bool:
@@ -301,18 +297,6 @@ def _is_navigation_chunk(chunk: Any) -> bool:
     if not _NAVIGATION_HINT.search(text):
         return False
     return len(_NAVIGATION_NUMBER.findall(text)) >= 8
-
-
-def _chunk_year(chunk: Any) -> int | None:
-    value = chunk.get("year") if isinstance(chunk, Mapping) else getattr(
-        chunk, "year", None
-    )
-    if isinstance(value, bool):
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
 
 
 def _plan_aspect_labels(plan: QueryPlan) -> list[str]:
@@ -414,16 +398,35 @@ def _is_period_fragment(question: str) -> bool:
     return len(content) <= 1 and bool(_YEAR_TOKEN.search(question))
 
 
-def _requested_years(filters: SearchFilters) -> set[int]:
-    if filters.years:
-        return set(filters.years)
-    if filters.year_from is not None or filters.year_to is not None:
-        start = filters.year_from if filters.year_from is not None else filters.year_to
-        end = filters.year_to if filters.year_to is not None else filters.year_from
-        if start is None or end is None:
-            return set()
-        return set(range(min(start, end), max(start, end) + 1))
-    return set()
+def requested_years(value: Any) -> set[int]:
+    """Годы из ``SearchFilters`` или их словарного представления."""
+    if isinstance(value, SearchFilters):
+        if value.years:
+            return set(value.years)
+        start = value.year_from
+        end = value.year_to
+    elif isinstance(value, Mapping):
+        years = value.get("years")
+        if isinstance(years, (list, tuple, set)):
+            return {
+                int(year)
+                for year in years
+                if isinstance(year, int) and not isinstance(year, bool)
+            }
+        start = value.get("year_from")
+        end = value.get("year_to")
+        if not isinstance(start, int) or isinstance(start, bool):
+            start = None
+        if not isinstance(end, int) or isinstance(end, bool):
+            end = None
+    else:
+        return set()
+    if start is None and end is None:
+        return set()
+    start = start if start is not None else end
+    end = end if end is not None else start
+    assert start is not None and end is not None
+    return set(range(min(start, end), max(start, end) + 1))
 
 
 def _target_years(state: AgentState, plan: QueryPlan) -> list[int]:
@@ -436,7 +439,7 @@ def _target_years(state: AgentState, plan: QueryPlan) -> list[int]:
         years.update(state.get("available_documents", {}).keys())
     if not years:
         years.update(
-            _requested_years(
+            requested_years(
                 state.get("effective_filters") or SearchFilters()
             )
         )
@@ -630,6 +633,7 @@ def _query_for_year(
 
 
 def content_attempt_key(item: dict[str, Any]) -> tuple[tuple[int, ...], Any]:
+    """Стабильный ключ попытки адресного поиска по разделу."""
     years = item.get("years")
     if isinstance(years, (list, tuple, set)):
         normalized = tuple(
@@ -663,7 +667,7 @@ def _section_content_target(
     """Раздел, который стоит дочитать по section_path (поздний год первым)."""
     if state.get("search_calls_used", 0) >= max_searches:
         return None
-    allowed_years = _requested_years(
+    allowed_years = requested_years(
         state.get("effective_filters") or SearchFilters()
     )
     evidence = state.get("evidence") or {}
@@ -698,23 +702,22 @@ class PlanAwareSelector:
         *,
         max_searches: int = DEFAULT_MAX_SEARCHES,
         max_structure_docs: int = DEFAULT_MAX_STRUCTURE_DOCS,
-        max_content_searches: int = DEFAULT_MAX_CONTENT_SEARCHES,
         max_queries: int = 3,
         coverage_enabled: bool = True,
         max_coverage_searches: int = 1,
     ) -> None:
-        if min(max_searches, max_structure_docs, max_content_searches) < 1:
+        if min(max_searches, max_structure_docs) < 1:
             raise ValueError("selector limits must be positive")
         if max_queries < 1 or max_coverage_searches < 1:
             raise ValueError("selector query limits must be positive")
         self.max_searches = max_searches
         self.max_structure_docs = max_structure_docs
-        self.max_content_searches = max_content_searches
         self.max_queries = max_queries
         self.coverage_enabled = coverage_enabled
         self.max_coverage_searches = max_coverage_searches
 
     def choose(self, state: AgentState) -> AgentAction | None:
+        """Выбрать следующий шаг по плану и собранным evidence."""
         plan = state.get("query_plan") or QueryPlan()
         if plan.intent == "structural":
             return self._choose_structural(state, plan)
@@ -782,7 +785,7 @@ class PlanAwareSelector:
             covered = set(state.get("covered_years", []))
             attempted = _attempted_years(state)
             effective = state.get("effective_filters") or SearchFilters()
-            requested = _requested_years(effective)
+            requested = requested_years(effective)
             for year in target_years:
                 if year in covered or year in attempted:
                     continue

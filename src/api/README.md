@@ -237,7 +237,7 @@ Fragment `#page=N` обрабатывает браузерный PDF-вьюер;
 
 ## Безопасность
 
-- `AUTH_MODE=local`: один владелец, cookie `HttpOnly`, `SameSite=Lax`,
+- Режим владельца один (`local`): cookie `HttpOnly`, `SameSite=Lax`,
   `Secure` при HTTPS; EventSource использует cookie, токенов в URL нет.
 - Каждая выборка/мутация фильтруется по `owner_id`; чужое → 404.
 - POST/PATCH/DELETE из чужого `Origin` отклоняются.
@@ -248,15 +248,15 @@ Fragment `#page=N` обрабатывает браузерный PDF-вьюер;
 
 ## Конфигурация (env, читается в lifespan)
 
-`AUTH_MODE`, `API_DB_PATH`, `API_SOURCE_REGISTRY_PATH`, `API_CORPUS_NAME`,
+`API_DB_PATH`, `API_SOURCE_REGISTRY_PATH`, `API_CORPUS_NAME`,
 `API_OWNER_COOKIE`, `API_COOKIE_SECURE`, `API_SESSION_MAX_AGE`,
 `API_CORS_ORIGINS`, `API_MAX_MESSAGE_CHARS`, `API_MAX_EVENT_BYTES`,
 `API_MAX_EVIDENCE_BYTES`, `API_REPLAY_BUFFER_EVENTS`, `API_REPLAY_TTL_SECONDS`,
 `API_HEARTBEAT_SECONDS`, `API_PAGE_SIZE_DEFAULT`, `API_PAGE_SIZE_MAX`,
-`API_HISTORY_RETENTION_DAYS`, `API_RATE_LIMIT_PER_MINUTE`, `API_SERVE_SPA`,
+`API_RATE_LIMIT_PER_MINUTE`, `API_SERVE_SPA`,
 `API_SPA_DIST_DIR`, `EVAL_UI_ENABLED`, `EVAL_DB_PATH`, `EVAL_RESULTS_DIR`,
-`EVAL_DATASETS_DIR`, `EVAL_MAX_CONCURRENCY`, `EVAL_QUEUE_SIZE`,
-`EVAL_RETENTION_RUNS`, `EVAL_YIELD_MS`, `EVAL_TURN_TIMEOUT_S`,
+`EVAL_DATASETS_DIR`, `EVAL_QUEUE_SIZE`,
+`EVAL_RETENTION_RUNS`, `EVAL_TURN_TIMEOUT_S`,
 `EVAL_RUN_TIMEOUT_S`, `EVAL_FAKE_SERVICE`, `EVAL_JUDGE_ENABLED`,
 `LLM_LOCK_PATH`.
 

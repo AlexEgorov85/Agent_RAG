@@ -1,0 +1,31 @@
+{
+  "dataset_version": "1.1",
+  "status": "full_corpus",
+  "partial": false,
+  "created_at": "2026-11-16T16:21:15Z",
+  "expected_corpus_sha256": "c70aabb541d07f2d5e4e7da477521e9f2e50bfb63abaf89d8c0a459a5d227154",
+  "corpus_content_sha256": "c70aabb541d07f2d5e4e7da477521e9f2e50bfb63abaf89d8c0a459a5d227154",
+  "corpus_fingerprint": "84cd7bd4dad01bc7d70d2c1aa9cc0b82774f97321e333db698afd3c79f4508b0",
+  "corpus_fingerprint_source": "data/indexes/84cd7bd4dad01bc7d70d2c1aa9cc0b82774f97321e333db698afd3c79f4508b0/manifest.json",
+  "chunk_count": 13969,
+  "documents": [
+    "sber_2015",
+    "sber_2016",
+    "sber_2017",
+    "sber_2018",
+    "sber_2019",
+    "sber_2020",
+    "sber_2022",
+    "sber_2023",
+    "sber_2024",
+    "sber_2025"
+  ],
+  "suite_hashes": {
+    "easy": "f7dfc41cb712999ebe8dc7f10987e9502d06a417b8d8b67f147861e6d9316f54",
+    "medium": "6bd0c6b0c317c486fdcea123b6f8b1f5b0016927dbfe56b70629078bdef21638",
+    "hard": "f43c5cd050d54e2d90d08c6bb5a950e2b2bb8a6ff8ef7d017d2cdf570281d32a",
+    "multi_turn": "2f1889b56b043478a7fe10a1ca5b1dc2d084c00a128108b27ba3a03aca7377fd"
+  },
+  "dataset_sha256": "eed43389e691f24dd8f947d87f7576ac38fe26663f6cf9007d4f990e1dbcc7f6",
+  "notes": "Бенчмарк по полному корпусу: 10 отчётов (2015–2020, 2022–2025), 13969 чанков. Вопросы составлены по текстам отчётов; каждое ожидаемое значение проверено на дословное присутствие в gold-чанке скриптом scripts/build_benchmark_full.py."
+}

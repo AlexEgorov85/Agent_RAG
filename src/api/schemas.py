@@ -34,6 +34,7 @@ _Year = Annotated[StrictInt, Field(ge=1900, le=2100)]
 
 
 class ApiModel(BaseModel):
+    """Базовая модель публичного API."""
     model_config = ConfigDict(extra="ignore")
 
 
@@ -90,6 +91,7 @@ class FilterSet(ApiModel):
 
 
 class EvidenceItem(ApiModel):
+    """Публичное свидетельство-цитата."""
     evidence_id: str
     chunk_id: str
     document_id: str | None = None
@@ -107,6 +109,7 @@ class EvidenceItem(ApiModel):
 
 
 class AnalysisResult(ApiModel):
+    """Публичный анализ ответа."""
     calculations: list[dict[str, Any]] = Field(default_factory=list)
     facts: list[dict[str, Any]] = Field(default_factory=list)
     coverage: dict[str, Any] | None = None
@@ -115,12 +118,14 @@ class AnalysisResult(ApiModel):
 
 
 class ErrorInfo(ApiModel):
+    """Публичное описание ошибки."""
     code: str
     message: str
     retryable: bool = False
 
 
 class ChatMessage(ApiModel):
+    """Сообщение диалога."""
     id: str
     research_id: str
     role: Literal["user", "assistant"]
@@ -136,6 +141,7 @@ class ChatMessage(ApiModel):
 
 
 class ResearchSummary(ApiModel):
+    """Краткое описание исследования."""
     id: str
     title: str
     created_at: str
@@ -146,12 +152,14 @@ class ResearchSummary(ApiModel):
 
 
 class ResearchListResponse(ApiModel):
+    """Список исследований."""
     items: list[ResearchSummary] = Field(default_factory=list)
     total: int = 0
     next_offset: int | None = None
 
 
 class ResearchCreate(ApiModel):
+    """Запрос создания исследования."""
     title: str | None = Field(default=None, max_length=200)
 
     @field_validator("title", mode="before")
@@ -165,6 +173,7 @@ class ResearchCreate(ApiModel):
 
 
 class ResearchUpdate(ApiModel):
+    """Запрос переименования."""
     title: str = Field(min_length=1, max_length=200)
 
     @field_validator("title", mode="before")
@@ -176,11 +185,13 @@ class ResearchUpdate(ApiModel):
 
 
 class ResearchRef(ApiModel):
+    """Ссылка на исследование."""
     id: str
     updated_at: str
 
 
 class MessageCreate(ApiModel):
+    """Запрос отправки сообщения."""
     content: str = Field(min_length=1, max_length=16_000)
     client_message_id: UUID
     filters: FilterSet | None = None
@@ -194,11 +205,13 @@ class MessageCreate(ApiModel):
 
 
 class MessageListResponse(ApiModel):
+    """Список сообщений."""
     items: list[ChatMessage] = Field(default_factory=list)
     next_before: str | None = None
 
 
 class MessageAccepted(ApiModel):
+    """Принятый асинхронный запрос."""
     request_id: str
     user_message: ChatMessage
     assistant_message_id: str
@@ -207,6 +220,7 @@ class MessageAccepted(ApiModel):
 
 
 class RequestState(ApiModel):
+    """Состояние запроса."""
     request_id: str
     status: RequestStatus
     message_id: str
@@ -215,6 +229,7 @@ class RequestState(ApiModel):
 
 
 class CancelResponse(ApiModel):
+    """Результат отмены."""
     request_id: str
     status: Literal["cancelled", "not_supported", "already_finished"]
     cancel_supported: bool
@@ -222,6 +237,7 @@ class CancelResponse(ApiModel):
 
 
 class HealthResponse(ApiModel):
+    """Ответ health."""
     status: Literal["ok", "unavailable"]
     contract_version: str = "1"
     database: Literal["ok", "error"] = "ok"
@@ -230,6 +246,7 @@ class HealthResponse(ApiModel):
 
 
 class CapabilitiesResponse(ApiModel):
+    """Флаги возможностей."""
     contract_version: str = "1"
     token_streaming: bool
     incremental_evidence: bool
@@ -250,6 +267,7 @@ class CapabilitiesResponse(ApiModel):
 
 
 class CorpusDocument(ApiModel):
+    """Документ корпуса."""
     doc_id: str
     year: int | None = None
     issuer: str | None = None
@@ -257,6 +275,7 @@ class CorpusDocument(ApiModel):
 
 
 class CorpusResponse(ApiModel):
+    """Описание корпуса."""
     name: str
     years: list[int] = Field(default_factory=list)
     documents: list[CorpusDocument] = Field(default_factory=list)
@@ -265,6 +284,7 @@ class CorpusResponse(ApiModel):
 
 
 class EvidenceDetail(ApiModel):
+    """Детали источника."""
     chunk_id: str
     document_id: str | None = None
     document_title: str | None = None
@@ -277,15 +297,3 @@ class EvidenceDetail(ApiModel):
     source_type: SourceType | None = None
     text: str = ""
     html: str | None = None
-
-
-class ErrorDetail(ApiModel):
-    code: str
-    message: str
-    request_id: str | None = None
-    retryable: bool = False
-    details: dict[str, Any] | None = None
-
-
-class ErrorResponse(ApiModel):
-    error: ErrorDetail

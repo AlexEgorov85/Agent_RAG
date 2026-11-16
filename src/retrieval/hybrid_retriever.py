@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
+
+from src.core.text import bounded_edit_distance
+from src.retrieval.contracts import RerankResult
+from src.retrieval.rrf import fuse_rankings, strip_scores as _strip_scores
 
 RRF_CONSTANT = 60
 
@@ -17,27 +21,7 @@ SECTION_FILTER_FALLBACK = "section_filter_fallback"
 #: этом случае не выполняется: чужие разделы не подменяют пустой ответ.
 SECTION_YEAR_ABSENT = "section_year_absent"
 
-#: Имена этапов retrieval для trace. ``graph`` заполняет графовый ретривер,
-#: ``context`` — упаковщик контекста; базовый гибридный поиск их не выдумывает.
-STAGE_NAMES: tuple[str, ...] = (
-    "dense",
-    "bm25",
-    "graph",
-    "rrf",
-    "rerank",
-    "returned",
-    "context",
-)
 
-
-@dataclass(frozen=True)
-class RerankResult:
-    """Контракт результата реранкера; ему соответствуют и заглушки, и реальные реранкеры."""
-
-    hits: list[dict[str, Any]] = field(default_factory=list)
-    used_fallback: bool = False
-    attempts: int = 1
-    warning: str | None = None
 DEFAULT_CANDIDATES = 20
 DEFAULT_RERANK_POOL = 10
 DEFAULT_TOP_K = 5
@@ -97,6 +81,13 @@ class SearchFilters:
             end = self.year_to if self.year_to is not None else self.year_from
             return set(range(int(start), int(end) + 1))
         return set()
+
+    def to_payload(self) -> dict[str, Any]:
+        """JSON-безопасное представление: множества становятся сортированными списками."""
+        return {
+            key: sorted(value) if isinstance(value, (set, frozenset)) else value
+            for key, value in vars(self).items()
+        }
 
 
 @dataclass(frozen=True)
@@ -265,9 +256,11 @@ class RetrievalTrace:
         self.unavailable[name] = reason
 
     def is_stage_available(self, name: str) -> bool:
+        """Измерен ли этап."""
         return bool(self.available.get(name, False))
 
     def stage_items(self, name: str) -> list[dict[str, Any]] | None:
+        """Элементы этапа."""
         return self.stages.get(name)
 
     def to_dict(self) -> dict[str, Any]:
@@ -430,21 +423,7 @@ def _matches(chunk: Mapping[str, Any], filters: SearchFilters) -> bool:
 
 def _edit_distance(left: str, right: str) -> int:
     """Расстояние Левенштейна для ограниченного исправления ID кандидатов."""
-    if left == right:
-        return 0
-    if abs(len(left) - len(right)) > 1:
-        return 2
-    previous = list(range(len(right) + 1))
-    for row, left_char in enumerate(left, start=1):
-        current = [row]
-        for column, right_char in enumerate(right, start=1):
-            current.append(min(
-                current[-1] + 1,
-                previous[column] + 1,
-                previous[column - 1] + (left_char != right_char),
-            ))
-        previous = current
-    return previous[-1]
+    return bounded_edit_distance(left, right)
 
 
 def _repair_candidate_ids(returned: Sequence[str],
@@ -470,12 +449,6 @@ def _repair_candidate_ids(returned: Sequence[str],
         used.add(matches[0])
         repaired.append(matches[0])
     return repaired if used == expected else None
-
-
-def _strip_scores(chunk: Mapping[str, Any]) -> dict[str, Any]:
-    reserved = {"score", "dense_score", "bm25_score", "rrf_score",
-                "rerank_score", "rerank_rank"}
-    return {key: value for key, value in chunk.items() if key not in reserved}
 
 
 class HybridRetriever:
@@ -625,12 +598,13 @@ class HybridRetriever:
         ``section_path_prefix`` — жёсткий фильтр. Если он задан, но строгий
         поиск не дал ни одного хита:
 
-        * раздел есть в корпусе, а запрошенных лет в нём нет — возвращается
-          пустая выдача с предупреждением ``section_year_absent``. Чужие
-          разделы не подставляются: пустой ответ честнее ложного;
-        * раздела нет в корпусе (расхождение таксономии ``data/structure`` и
-          ``section_path`` чанков) — выполняется явный fallback: тот же поиск
-          без section-фильтра, но с названием раздела в запросе. Если название
+        * раздел есть в корпусе, запрошены годы, и ни одного из них в разделе
+          нет — возвращается пустая выдача с предупреждением
+          ``section_year_absent``. Чужие разделы не подставляются: пустой ответ
+          честнее ложного;
+        * в остальных случаях (раздела нет в корпусе, годы не заданы, либо оба
+          канала поиска упали) выполняется явный fallback: тот же поиск без
+          section-фильтра, но с названием раздела в запросе. Если название
           раздела (лист префикса) найдено в ``section_path`` чанков, остаются
           только такие хиты (title-mapping), иначе берутся все хиты поиска без
           фильтра.
@@ -939,37 +913,14 @@ class HybridRetriever:
         trace.fallback["dense"] = trace.dense_failed
         trace.fallback["bm25"] = trace.bm25_failed
 
-        fused: dict[str, dict[str, Any]] = {}
-        first_seen: dict[str, int] = {}
-        counter = 0
-        for channel, hits in rankings:
-            seen: set[str] = set()
-            for rank, hit in enumerate(hits, start=1):
-                chunk_id = _chunk_id(hit)
-                if chunk_id in seen:
-                    continue
-                seen.add(chunk_id)
-                if chunk_id not in fused:
-                    fused[chunk_id] = {
-                        "chunk": _strip_scores(hit),
-                        "dense_rank": None, "bm25_rank": None,
-                        "dense_score": None, "bm25_score": None,
-                        "rrf_score": 0.0,
-                    }
-                    first_seen[chunk_id] = counter
-                    counter += 1
-                record = fused[chunk_id]
-                best_rank = record[f"{channel}_rank"]
-                if best_rank is None or rank < best_rank:
-                    record[f"{channel}_rank"] = rank
-                score = float(hit.get("score", 0.0))
-                best_score = record[f"{channel}_score"]
-                if best_score is None or score > best_score:
-                    record[f"{channel}_score"] = score
-                record["rrf_score"] += 1 / (RRF_CONSTANT + rank)
-
-        order = sorted(fused, key=lambda cid: (-fused[cid]["rrf_score"],
-                                               first_seen[cid]))
+        fused_items = fuse_rankings(
+            rankings,
+            constant=RRF_CONSTANT,
+            channel_names=("dense", "bm25"),
+            strip=True,
+        )
+        fused = dict(fused_items)
+        order = [chunk_id for chunk_id, _record in fused_items]
         failed_channels = [
             failed
             for requested, failed in (

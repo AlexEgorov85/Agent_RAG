@@ -1,9 +1,10 @@
 """Сериализация dataclass-контрактов ядра в публичный JSON adapter'а.
 
 Правила §7.10: поля не пересобираются и не пересчитываются, ``calculations``,
-``structural_changes``, ``coverage``, ``verification`` и ``effective_filters``
-сохраняются полностью. Adapter не добавляет событий, которых не было в
-backend, кроме ``message_id``, heartbeat, ``run_cancelled`` и ``resync``.
+``structural_changes``, ``coverage`` и ``verification`` сохраняются полностью,
+а ``effective_filters`` — в публичном виде без пустых полей. Adapter добавляет
+только ``message_id``, heartbeat, ``run_cancelled``/``resync``, а в fallback без
+backend-потока — синтетические ``run_started``/``run_completed``/``run_failed``.
 """
 
 from __future__ import annotations
@@ -45,16 +46,6 @@ def utc_now_iso() -> str:
     )
 
 
-def to_utc_iso(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        if value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-    return str(value)
-
-
 def _field(value: Any, key: str, default: Any = None) -> Any:
     if value is None:
         return default
@@ -64,7 +55,11 @@ def _field(value: Any, key: str, default: Any = None) -> Any:
 
 
 def jsonable(value: Any) -> Any:
-    """Приводит значение к JSON-безопасному виду без изменения семантики."""
+    """Приводит значение к JSON-безопасному виду.
+
+    Нефинитные ``float`` становятся ``None``, неизвестные объекты — строкой;
+    остальные контейнеры и dataclass рекурсивно преобразуются.
+    """
     if value is None or isinstance(value, (str, bool, int)):
         return value
     if isinstance(value, float):
@@ -252,6 +247,7 @@ def analysis_from_result(result: Any) -> dict[str, Any]:
 
 
 def result_status(result: Any) -> str:
+    """Публичный статус результата."""
     status = _field(result, "status", "completed")
     if status == "failed":
         return "failed"
@@ -262,7 +258,10 @@ def result_status(result: Any) -> str:
 
 
 def result_message_fields(result: Any, metadata_for: Any = None) -> dict[str, Any]:
-    """Терминальный ``AgentRunResult`` → поля сообщения и ``answer_json``."""
+    """Терминальный ``AgentRunResult`` → поля сообщения.
+
+    ``answer_json`` собирается отдельно :func:`answer_json_from_fields`.
+    """
     answer = _field(result, "answer")
     citations = list(_field(answer, "citations", []) or [])
     evidence = [
@@ -289,6 +288,7 @@ def result_message_fields(result: Any, metadata_for: Any = None) -> dict[str, An
 
 
 def answer_json_from_fields(fields: Mapping[str, Any]) -> str:
+    """Собрать ``answer_json`` из полей сообщения."""
     payload = {
         "evidence": fields.get("evidence", []),
         "analysis": fields.get("analysis"),
@@ -455,4 +455,5 @@ def agent_event_payload(
 
 
 def error_info(code: str, message: str, retryable: bool = False) -> dict[str, Any]:
+    """Построить ``ErrorInfo`` по коду и сообщению."""
     return {"code": code, "message": message, "retryable": bool(retryable)}

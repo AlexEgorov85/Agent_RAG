@@ -1,4 +1,4 @@
-"""Env-версия курсового ``get_credentials`` (Занятие 1), без Colab/getpass."""
+"""Чтение ключа Cloud.ru из настроек или переменных окружения."""
 
 from __future__ import annotations
 

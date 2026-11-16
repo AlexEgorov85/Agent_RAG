@@ -8,12 +8,6 @@ from typing import Any, Literal, TypedDict
 from src.retrieval.hybrid_retriever import SearchFilters
 
 
-ToolName = Literal[
-    "search_reports", "get_structure_tree", "get_entities", "get_chunk"
-]
-ReasonCode = Literal[
-    "fact_lookup", "clarify_structure", "explore_entities", "inspect_evidence"
-]
 AnswerStatus = Literal["answer", "abstain"]
 
 
@@ -47,6 +41,7 @@ class AgentAction:
 
 @dataclass(frozen=True)
 class Citation:
+    """Ссылка на чанк-источник в ответе."""
     chunk_id: str
     doc_id: str | None = None
     year: int | None = None
@@ -74,6 +69,7 @@ class Answer:
 
 @dataclass(frozen=True)
 class ToolEvent:
+    """Безопасная запись одного вызова инструмента."""
     tool_name: str
     arguments: dict[str, Any]
     status: str
@@ -85,7 +81,7 @@ class ToolEvent:
 
 @dataclass(frozen=True)
 class AgentEvent:
-    """Безопасное для UI потоковое событие; ``result`` заполняется на run_completed."""
+    """Безопасное для UI потоковое событие; ``result`` заполняется на терминальном событии ``run_completed``/``run_failed``."""
 
     event_type: str
     request_id: str
@@ -95,6 +91,7 @@ class AgentEvent:
 
 @dataclass(frozen=True)
 class AgentRunResult:
+    """Полный результат одного хода агента."""
     request_id: str
     conversation_id: str
     answer: Answer

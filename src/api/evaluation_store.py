@@ -3,10 +3,11 @@
 Отдельная БД ``data/evaluation/evaluation.sqlite3`` (``EVAL_DB_PATH``) не
 смешивается с историей пользовательских диалогов. Полные traces и отчёты
 остаются на диске в ``eval/results/{run_id}/``; SQLite хранит индекс, статусы,
-summary и краткую запись ``cases.jsonl``.
+summary и полный ``case_json`` каждого результата.
 
-API не пересчитывает метрики: ``summary.json`` и ``cases.jsonl`` читает worker
-после завершения runner'а, а endpoint'ы только отдают сохранённые значения.
+API не пересчитывает summary/cases: worker читает ``summary.json`` и
+``cases.jsonl`` после завершения runner'а, а endpoint'ы отдают сохранённые
+значения. Исключение — сравнение запусков: дельты метрик считаются на чтении.
 """
 
 from __future__ import annotations
@@ -179,17 +180,6 @@ class EvaluationStore:
             self._initialized = True
         self.recover_interrupted()
 
-    def ping(self) -> bool:
-        try:
-            connection = self._connect()
-            try:
-                connection.execute("SELECT 1").fetchone()
-                return True
-            finally:
-                connection.close()
-        except sqlite3.Error:
-            return False
-
     # ------------------------------------------------------------- lifecycle
     def recover_interrupted(self) -> int:
         """``queued``/``running``/``cancel_requested`` после рестарта → ``interrupted``."""
@@ -237,6 +227,7 @@ class EvaluationStore:
         client_request_id: str | None = None,
         tests_total: int | None = None,
     ) -> dict[str, Any]:
+        """Создать запись прогона в статусе ``queued``."""
         now = utc_now()
         progress = {
             "tests_total": int(tests_total or 0),
@@ -274,6 +265,7 @@ class EvaluationStore:
         return run
 
     def get_run(self, run_id: str) -> dict[str, Any] | None:
+        """Вернуть прогон по ID."""
         connection = self._connect()
         try:
             row = connection.execute(
@@ -286,6 +278,7 @@ class EvaluationStore:
     def find_by_client_request_id(
         self, client_request_id: str
     ) -> dict[str, Any] | None:
+        """Найти прогон по idempotency-ключу клиента."""
         connection = self._connect()
         try:
             row = connection.execute(
@@ -306,6 +299,7 @@ class EvaluationStore:
         limit: int = 20,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
+        """Список прогонов с фильтрами и пагинацией."""
         where: list[str] = []
         params: list[Any] = []
         for column, value in (
@@ -336,6 +330,7 @@ class EvaluationStore:
         return [dict(row) for row in rows], total
 
     def last_completed_run(self, *, retrieval_mode: str | None = None) -> dict[str, Any] | None:
+        """Последний завершённый прогон."""
         connection = self._connect()
         try:
             if retrieval_mode:
@@ -354,6 +349,7 @@ class EvaluationStore:
         return dict(row) if row is not None else None
 
     def mark_running(self, run_id: str) -> bool:
+        """Перевести ``queued``-прогон в ``running``."""
         connection = self._connect()
         try:
             cursor = connection.execute(
@@ -367,6 +363,7 @@ class EvaluationStore:
             connection.close()
 
     def set_progress(self, run_id: str, progress: Mapping[str, Any]) -> None:
+        """Сохранить прогресс выполнения."""
         connection = self._connect()
         try:
             connection.execute(
@@ -423,6 +420,7 @@ class EvaluationStore:
             connection.close()
 
     def mark_cancel_timeout(self, run_id: str) -> bool:
+        """Пометить прогон как неотменившийся по таймауту."""
         connection = self._connect()
         try:
             cursor = connection.execute(
@@ -519,7 +517,7 @@ class EvaluationStore:
     def replace_results(
         self, run_id: str, cases: list[Mapping[str, Any]]
     ) -> int:
-        """Идемпотентно записать ``cases.jsonl``: повтор обновляет строку."""
+        """Идемпотентно записать результаты тестов в SQLite (upsert по ключу)."""
         rows = []
         for case in cases:
             if not isinstance(case, Mapping):
@@ -595,6 +593,7 @@ class EvaluationStore:
         retrieval_mode: str,
         attempt_index: int,
     ) -> dict[str, Any] | None:
+        """Результат теста по run/test/mode/attempt."""
         connection = self._connect()
         try:
             row = connection.execute(
@@ -607,6 +606,7 @@ class EvaluationStore:
         return _result_row(row) if row is not None else None
 
     def result_modes(self, run_id: str, test_id: str) -> list[str]:
+        """Режимы, для которых есть результаты теста."""
         connection = self._connect()
         try:
             rows = connection.execute(
@@ -631,6 +631,7 @@ class EvaluationStore:
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
+        """Все результаты прогона."""
         where = ["run_id = ?"]
         params: list[Any] = [run_id]
         if status:
@@ -670,6 +671,7 @@ class EvaluationStore:
         return [_result_row(row) for row in rows], total
 
     def all_results(self, run_id: str) -> list[dict[str, Any]]:
+        """Полные записи результатов прогона."""
         connection = self._connect()
         try:
             rows = connection.execute(
@@ -703,6 +705,7 @@ class EvaluationStore:
     def test_history(
         self, test_id: str, *, limit: int = 20
     ) -> list[dict[str, Any]]:
+        """История результатов теста по прогонам."""
         connection = self._connect()
         try:
             rows = connection.execute(
@@ -865,6 +868,7 @@ class EvaluationWorker:
             timer.start()
 
     def shutdown(self) -> None:
+        """Остановить worker и дождаться завершения."""
         with self._lock:
             self._closed = True
             controls = list(self._controls.values())
@@ -1121,6 +1125,7 @@ class EvaluationDatasetSnapshot:
     error_code: str | None = None
 
     def test_by_id(self, test_id: str) -> dict[str, Any] | None:
+        """Найти определение теста по ID."""
         for test in self.tests:
             if test.get("id") == test_id:
                 return test
@@ -1146,6 +1151,7 @@ class EvaluationRuntime:
         self._dataset: EvaluationDatasetSnapshot | None = None
 
     def dataset(self, *, refresh: bool = False) -> EvaluationDatasetSnapshot:
+        """Кэшированный снимок датасета."""
         with self._dataset_lock:
             if self._dataset is not None and not refresh:
                 return self._dataset
@@ -1153,6 +1159,7 @@ class EvaluationRuntime:
             return self._dataset
 
     def shutdown(self) -> None:
+        """Остановить worker и освободить runtime."""
         self.worker.shutdown()
 
 

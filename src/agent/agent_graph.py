@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import inspect
 import math
 import re
 import time
@@ -23,11 +22,13 @@ from src.agent.coverage import (
     extract_metrics,
     normalize_metric,
 )
+from src.agent.metric_evidence import attach_metric_evidence
 from src.agent.selector import (
     PlanAwareSelector,
     aspect_search_candidates,
     content_attempt_key,
     plan_section_path,
+    requested_years,
 )
 from src.agent.state import AgentAction, AgentState, Answer, QueryPlan, ToolEvent
 from src.agent.tools import (
@@ -37,6 +38,8 @@ from src.agent.tools import (
     result_hits,
     result_warnings,
 )
+from src.core.introspection import supports_keyword
+from src.core.record import chunk_year as _chunk_year
 from src.engine.calculations import parse_number
 from src.engine.structure_compare import (
     StructureAnalyzer,
@@ -49,8 +52,8 @@ from src.retrieval.hybrid_retriever import SearchFilters
 MAX_TOOL_CALLS = 4
 MAX_SEARCH_CALLS = 2
 
-#: Политика clarify: temporal-вопрос с показателем, но без периода в самом
-#: вопросе/фильтрах/истории, не даёт корректного сравнения. Такой запрос
+#: Политика clarify: temporal/multi_hop-вопрос с показателем, но без периода в
+#: самом вопросе/фильтрах/истории, не даёт корректного сравнения. Такой запрос
 #: уточняется до поиска, а не превращается в abstain «no_evidence».
 _EXPLICIT_YEAR = re.compile(r"\b(?:18|19|20|21)\d{2}\b")
 _EXPLICIT_PERIOD = re.compile(
@@ -82,9 +85,10 @@ def _has_explicit_period(text: str) -> bool:
 def _clarification_prompt(state: AgentState) -> str | None:
     """Текст уточнения периода или ``None``, если запрос можно искать.
 
-    Уточнение запрашивается только для trend/temporal-вопроса с показателем,
-    когда период не задан ни пользовательскими фильтрами, ни самим вопросом,
-    ни историей диалога. Это защищает от подмены периода «всем корпусом».
+    Уточнение запрашивается только для trend/temporal/multi_hop-вопроса с
+    показателем, когда период не задан ни пользовательскими фильтрами, ни самим
+    вопросом, ни историей диалога. Это защищает от подмены периода «всем
+    корпусом».
     """
     plan = state.get("query_plan") or QueryPlan()
     question = state.get("question", "")
@@ -94,7 +98,7 @@ def _clarification_prompt(state: AgentState) -> str | None:
         return None
     if not (plan.requires_comparison or _TREND_QUESTION.search(question)):
         return None
-    if _requested_years(state.get("filters") or SearchFilters()):
+    if requested_years(state.get("filters") or SearchFilters()):
         return None
     if _has_explicit_period(question):
         return None
@@ -112,26 +116,17 @@ def _clarification_prompt(state: AgentState) -> str | None:
 
 
 class Router(Protocol):
-    def analyze(self, question: str, filters: SearchFilters) -> QueryPlan: ...
+    """Протокол роутера: классифицирует вопрос в ``QueryPlan``."""
+    def analyze(self, question: str, filters: SearchFilters) -> QueryPlan:
+        """Вернуть план поиска для вопроса и явных фильтров."""
+        ...
 
 
 class ActionSelector(Protocol):
-    def choose(self, state: AgentState) -> AgentAction | None: ...
-
-
-def _supports_keyword(target: Callable[..., Any], keyword: str) -> bool:
-    try:
-        parameters = inspect.signature(target).parameters.values()
-    except (TypeError, ValueError):
-        return False
-    return any(
-        item.kind == inspect.Parameter.VAR_KEYWORD
-        or (
-            item.name == keyword
-            and item.kind != inspect.Parameter.POSITIONAL_ONLY
-        )
-        for item in parameters
-    )
+    """Протокол выбора следующего действия агента."""
+    def choose(self, state: AgentState) -> AgentAction | None:
+        """Выбрать один вызов инструмента или ``None``."""
+        ...
 
 
 def _as_plan(value: Any) -> QueryPlan:
@@ -373,23 +368,28 @@ def _graph_entity_diagnostics(result: Any) -> dict[str, Any] | None:
     }
 
 
+def _debug_answer_node_failure(exc: BaseException) -> None:
+    """Записать падение узла ответа при ``RAG_DEBUG_GENERATION=1``."""
+    import os
+    import traceback
+    from pathlib import Path
+
+    if os.getenv("RAG_DEBUG_GENERATION") != "1":
+        return
+    try:
+        target = Path("logs") / "graph_debug.txt"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("".join(traceback.format_exception(exc)), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def _contained_chunk_id(chunk: Any) -> str | None:
     if isinstance(chunk, Mapping):
         value = chunk.get("chunk_id")
     else:
         value = getattr(chunk, "chunk_id", None)
     return value if isinstance(value, str) and value else None
-
-
-def _chunk_year(chunk: Any) -> int | None:
-    if isinstance(chunk, Mapping):
-        value = chunk.get("year")
-    else:
-        value = getattr(chunk, "year", None)
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
 
 
 def _year_from_doc_id(doc_id: Any) -> int | None:
@@ -399,42 +399,8 @@ def _year_from_doc_id(doc_id: Any) -> int | None:
     return int(match.group(0)) if match is not None else None
 
 
-def _requested_years(value: Any) -> set[int]:
-    if isinstance(value, SearchFilters):
-        if value.years:
-            return set(value.years)
-        start = value.year_from if value.year_from is not None else value.year_to
-        end = value.year_to if value.year_to is not None else value.year_from
-        if start is None or end is None:
-            return set()
-        return set(range(min(start, end), max(start, end) + 1))
-    if not isinstance(value, Mapping):
-        return set()
-    years = value.get("years")
-    if isinstance(years, (list, tuple, set)):
-        return {
-            int(year)
-            for year in years
-            if isinstance(year, int) and not isinstance(year, bool)
-        }
-    start = value.get("year_from")
-    end = value.get("year_to")
-    if not isinstance(start, int) or isinstance(start, bool):
-        start = None
-    if not isinstance(end, int) or isinstance(end, bool):
-        end = None
-    if start is None and end is None:
-        return set()
-    start = start if start is not None else end
-    end = end if end is not None else start
-    return set(range(min(start, end), max(start, end) + 1))
-
-
 def _filters_dict(filters: SearchFilters) -> dict[str, Any]:
-    return {
-        key: sorted(value) if isinstance(value, set) else value
-        for key, value in vars(filters).items()
-    }
+    return filters.to_payload()
 
 
 def _intersect(left: Any, right: Any) -> Any:
@@ -483,8 +449,8 @@ def _merge_action_filters(
     if action_filters.normalized() == effective.normalized():
         return effective
 
-    base_years = _requested_years(effective)
-    action_years = _requested_years(action_filters)
+    base_years = requested_years(effective)
+    action_years = requested_years(action_filters)
     if base_years and action_years:
         years = base_years & action_years
         if not years:
@@ -634,24 +600,9 @@ def _safe_action(value: Any) -> AgentAction | None:
 
 class _DefaultRouter:
     def analyze(self, question: str, filters: SearchFilters) -> QueryPlan:
+        """Детерминированный fallback: пустой план без LLM."""
         del filters
         return QueryPlan()
-
-
-class _DefaultSelector:
-    def choose(self, state: AgentState) -> AgentAction | None:
-        if not state.get("tool_events"):
-            return AgentAction(
-                "search_reports",
-                {
-                    "query": state["question"],
-                    "filters": state["effective_filters"],
-                    "retrieval_mode": "hybrid",
-                    "top_k": 5,
-                },
-                "fact_lookup",
-            )
-        return None
 
 
 def build_agent_graph(
@@ -847,10 +798,29 @@ def build_agent_graph(
         try:
             target = router.analyze if hasattr(router, "analyze") else router
             kwargs = {}
-            if _supports_keyword(target, "history"):
+            if supports_keyword(target, "history"):
                 kwargs["history"] = list(state.get("history", []))
             result = target(state["question"], state["filters"], **kwargs)
             plan = _as_plan(result)
+            # Follow-up ??? ??????? (?? ?? 2024 ?????) ????????? ??????? ??
+            # ???????: ????? ????? ???? ??? coverage ? ????? ?????? ? abstain.
+            if not plan.required_metrics:
+                from src.agent.coverage import extract_metrics
+
+                # 1) ??????? ????? ? ???????; 2) follow-up ????????? ?? ??
+                # ?????????? ???????? ???????????? (?? ?? ??????? ??????????:
+                # ??? ??????????? ??? ??????? ?????? ? ???? ??????????????).
+                inherited = extract_metrics(str(state.get("question") or ""))
+                if not inherited:
+                    user_text = " ".join(
+                        str(item.get("content") or "")
+                        for item in list(state.get("history", []))[-6:]
+                        if isinstance(item, Mapping)
+                        and item.get("role") == "user"
+                    )
+                    inherited = extract_metrics(user_text) if user_text else []
+                if inherited:
+                    plan = replace(plan, required_metrics=inherited[:5])
             if (
                 plan.intent == "structural"
                 and not _STRUCTURAL_QUESTION.search(state["question"])
@@ -880,14 +850,14 @@ def build_agent_graph(
             return {
                 "query_plan": plan,
                 "expected_years": sorted(
-                    _requested_years(state.get("filters") or SearchFilters())
+                    requested_years(state.get("filters") or SearchFilters())
                 ),
                 "rewritten_queries": [],
                 "warnings": state.get("warnings", []) + ["query_analysis_fallback"],
             }
         effective = _filters_with_plan(state["filters"], plan)
         # Явные фильтры пользователя уже учтены в effective и важнее плана.
-        expected_years = _requested_years(effective) or set(plan.years)
+        expected_years = requested_years(effective) or set(plan.years)
         if plan.requires_comparison or plan.answer_mode == "comparison":
             # Follow-up сравнение («а каким он был в 2022?») должно помнить
             # год предыдущего ответа, иначе «насколько вырос» не с чем
@@ -901,7 +871,7 @@ def build_agent_graph(
                 merged_years = sorted(set(plan.years) | carried_years)[:5]
                 plan = replace(plan, years=merged_years)
                 effective = _filters_with_plan(state["filters"], plan)
-                expected_years = _requested_years(effective) or set(plan.years)
+                expected_years = requested_years(effective) or set(plan.years)
         rewritten_queries: list[str] = []
         analysis_warnings: list[str] = []
         if plan.needs_rewriting and query_rewriter is not None:
@@ -912,7 +882,7 @@ def build_agent_graph(
                     else query_rewriter
                 )
                 rewrite_kwargs = {}
-                if _supports_keyword(target, "history"):
+                if supports_keyword(target, "history"):
                     rewrite_kwargs["history"] = list(
                         state.get("history", [])
                     )
@@ -1249,8 +1219,8 @@ def build_agent_graph(
                 if (year := _chunk_year(chunk)) is not None
             }
         )
-        requested_years = _requested_years(state.get("effective_filters", SearchFilters()))
-        if len(requested_years) > 1 and requested_years - set(covered_years):
+        wanted_years = requested_years(state.get("effective_filters", SearchFilters()))
+        if len(wanted_years) > 1 and wanted_years - set(covered_years):
             warnings.append("incomplete_period")
 
         plan = state.get("query_plan") or QueryPlan()
@@ -1258,7 +1228,7 @@ def build_agent_graph(
             filters = arguments.get("filters")
             if isinstance(filters, SearchFilters):
                 filters = _filters_dict(filters)
-            requested_now = _requested_years(filters)
+            requested_now = requested_years(filters)
             metric = arguments.get("metric")
             metric = metric if isinstance(metric, str) and metric else None
             if metric:
@@ -1313,6 +1283,13 @@ def build_agent_graph(
 
         if calls + 1 >= max_tool_calls:
             warnings.append("tool_budget_exhausted")
+        attach_metric_evidence(
+            tools,
+            plan,
+            evidence,
+            manifest,
+            search_manifest if action.tool_name == "search_reports" else None,
+        )
         emit(
             "tool_completed",
             {
@@ -1352,7 +1329,7 @@ def build_agent_graph(
         if not expected and plan.year_from is not None and plan.year_to is not None:
             expected = set(range(plan.year_from, plan.year_to + 1))
         if not expected:
-            expected = _requested_years(effective)
+            expected = requested_years(effective)
         required_metrics = list(plan.required_metrics) or extract_metrics(
             state.get("question", "")
         )
@@ -1492,7 +1469,8 @@ def build_agent_graph(
         else:
             try:
                 answer, answer_warnings = answer_generator(state)
-            except Exception:
+            except Exception as exc:
+                _debug_answer_node_failure(exc)
                 # Ошибки генератора/провайдера не попадают в состояние и UI.
                 answer = Answer(
                     "abstain",

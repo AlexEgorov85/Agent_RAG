@@ -1,0 +1,883 @@
+{
+  "schema_version": "1.1",
+  "suite": "medium",
+  "expected_corpus_sha256": "c70aabb541d07f2d5e4e7da477521e9f2e50bfb63abaf89d8c0a459a5d227154",
+  "tests": [
+    {
+      "id": "medium_001",
+      "suite": "medium",
+      "split": "dev",
+      "category": "temporal",
+      "difficulty": "medium",
+      "tags": [
+        "comparison",
+        "net_profit"
+      ],
+      "question": "Как изменилась чистая прибыль Группы с 2019 по 2020 год?",
+      "filters": {
+        "years": [
+          2019,
+          2020
+        ],
+        "allowed_doc_ids": [
+          "sber_2019",
+          "sber_2020"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "С 845,0 млрд рублей в 2019 году до 760,3 млрд рублей в 2020 году,",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "net_profit",
+            "metric_aliases": [
+              "чистая прибыль"
+            ],
+            "year": 2019,
+            "value": 845.0,
+            "unit": "млрд руб.",
+            "unit_aliases": [
+              "млрд рублей",
+              "млрд руб"
+            ],
+            "tolerance": 0.01
+          },
+          {
+            "metric": "net_profit",
+            "metric_aliases": [
+              "чистая прибыль"
+            ],
+            "year": 2020,
+            "value": 760.3,
+            "unit": "млрд руб.",
+            "unit_aliases": [
+              "млрд рублей",
+              "млрд руб"
+            ],
+            "tolerance": 0.01
+          }
+        ],
+        "required_years": [
+          2019,
+          2020
+        ],
+        "required_documents": [
+          "sber_2019",
+          "sber_2020"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "net_profit_2019",
+            "any_of": [
+              "sber_2019:03567:c0:bd7785fd7bf8",
+              "sber_2019:03513:c0:dcd0ad9b62b3",
+              "sber_2019:03573:c0:7e090f4e9c7b",
+              "sber_2019:04506:c0:dd463cad2b2a",
+              "sber_2019:04514:c0:a084e54d22e2",
+              "sber_2019:04521:c0:d6747c66a4f0"
+            ],
+            "section": ""
+          },
+          {
+            "id": "net_profit_2020",
+            "any_of": [
+              "sber_2020:03905:c0:3c7a954ad022",
+              "sber_2020:00618:c0:b6a6a13b4d23",
+              "sber_2020:03867:c0:a83f325325f6",
+              "sber_2020:03910:c0:d0d23cbfadc5",
+              "sber_2020:04737:c0:4a2d61f1a3d7",
+              "sber_2020:04817:c0:e80b3c655e7d"
+            ],
+            "section": ""
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 3,
+        "max_tool_calls": 5,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "2019",
+          "2020"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": ""
+    },
+    {
+      "id": "medium_002",
+      "suite": "medium",
+      "split": "dev",
+      "category": "temporal",
+      "difficulty": "medium",
+      "tags": [
+        "comparison",
+        "net_profit"
+      ],
+      "question": "Как изменилась чистая прибыль Группы с 2023 по 2025 год?",
+      "filters": {
+        "years": [
+          2023,
+          2025
+        ],
+        "allowed_doc_ids": [
+          "sber_2023",
+          "sber_2025"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "С 1 508,6 млрд рублей в 2023 году до 1 705,9 млрд рублей в 2025 году,",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "net_profit",
+            "metric_aliases": [
+              "чистая прибыль"
+            ],
+            "year": 2023,
+            "value": 1508.6,
+            "unit": "млрд руб.",
+            "unit_aliases": [
+              "млрд рублей",
+              "млрд руб"
+            ],
+            "tolerance": 0.01
+          },
+          {
+            "metric": "net_profit",
+            "metric_aliases": [
+              "чистая прибыль"
+            ],
+            "year": 2025,
+            "value": 1705.9,
+            "unit": "млрд руб.",
+            "unit_aliases": [
+              "млрд рублей",
+              "млрд руб"
+            ],
+            "tolerance": 0.01
+          }
+        ],
+        "required_years": [
+          2023,
+          2025
+        ],
+        "required_documents": [
+          "sber_2023",
+          "sber_2025"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "net_profit_2023",
+            "any_of": [
+              "sber_2023:02177:c0:1aacabe279c5",
+              "sber_2023:00078:c3:c5cc6e1f46e2",
+              "sber_2023:02155:c0:ae8e7681bb66",
+              "sber_2023:02180:c0:cece0f56f420",
+              "sber_2023:03797:c0:9147f4cb3176",
+              "sber_2023:03805:c0:5bff9295a47d"
+            ],
+            "section": ""
+          },
+          {
+            "id": "net_profit_2025",
+            "any_of": [
+              "sber_2025:00070:c0:00dabc46d736",
+              "sber_2025:04212:c0:305872c43506",
+              "sber_2025:04237:c1:f00478933e74",
+              "sber_2025:04249:c0:a0eb8021225e",
+              "sber_2025:06954:c0:453c6bf65cb1",
+              "sber_2025:06963:c0:f6a09057d36e"
+            ],
+            "section": ""
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 3,
+        "max_tool_calls": 5,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "2023",
+          "2025"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": ""
+    },
+    {
+      "id": "medium_003",
+      "suite": "medium",
+      "split": "dev",
+      "category": "temporal",
+      "difficulty": "medium",
+      "tags": [
+        "comparison",
+        "roe"
+      ],
+      "question": "Как изменилась рентабельность капитала и чистая прибыль с 2016 по 2023 год?",
+      "filters": {
+        "years": [
+          2016,
+          2023
+        ],
+        "allowed_doc_ids": [
+          "sber_2016",
+          "sber_2023"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "ROE выросла с 20,8% в 2016 году до 25,3% в 2023 году, чистая прибыль — с 541,9 до 1 508,6 млрд рублей.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "roe",
+            "metric_aliases": [
+              "рентабельность капитала",
+              "ROE"
+            ],
+            "year": 2016,
+            "value": 20.8,
+            "unit": "%",
+            "unit_aliases": [
+              "процент",
+              "%"
+            ],
+            "tolerance": 0.01
+          },
+          {
+            "metric": "roe",
+            "metric_aliases": [
+              "рентабельность капитала",
+              "ROE"
+            ],
+            "year": 2023,
+            "value": 25.3,
+            "unit": "%",
+            "unit_aliases": [
+              "процент",
+              "%"
+            ],
+            "tolerance": 0.01
+          }
+        ],
+        "required_years": [
+          2016,
+          2023
+        ],
+        "required_documents": [
+          "sber_2016",
+          "sber_2023"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "roe_2016",
+            "any_of": [
+              "sber_2016:00150:c0:7e5014204d8c",
+              "sber_2016:00156:c0:999ef1e8a2db",
+              "sber_2016:00480:c2:aadd91380839",
+              "sber_2016:03615:c0:af7054a9a09a"
+            ],
+            "section": ""
+          },
+          {
+            "id": "roe_2023",
+            "any_of": [
+              "sber_2023:00078:c3:c5cc6e1f46e2",
+              "sber_2023:02163:c0:52f3272e800a"
+            ],
+            "section": ""
+          },
+          {
+            "id": "net_profit_2023",
+            "any_of": [
+              "sber_2023:02177:c0:1aacabe279c5",
+              "sber_2023:00078:c3:c5cc6e1f46e2",
+              "sber_2023:02155:c0:ae8e7681bb66",
+              "sber_2023:02180:c0:cece0f56f420",
+              "sber_2023:03797:c0:9147f4cb3176",
+              "sber_2023:03805:c0:5bff9295a47d"
+            ],
+            "section": ""
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 3,
+        "max_tool_calls": 5,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "2016",
+          "2023"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": ""
+    },
+    {
+      "id": "medium_004",
+      "suite": "medium",
+      "split": "holdout",
+      "category": "fact_lookup",
+      "difficulty": "medium",
+      "tags": [
+        "dividends",
+        "numeric"
+      ],
+      "question": "Какой размер дивиденда на акцию был объявлен по итогам 2017 года?",
+      "filters": {
+        "years": [
+          2017
+        ],
+        "allowed_doc_ids": [
+          "sber_2017"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "12 рубля на акцию.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "dividends_per_share",
+            "metric_aliases": [
+              "дивиденд на акцию",
+              "дивиденды на акцию"
+            ],
+            "year": 2017,
+            "value": 12.0,
+            "unit": "руб.",
+            "unit_aliases": [
+              "рублей",
+              "руб",
+              "₽"
+            ],
+            "tolerance": 0.005
+          }
+        ],
+        "required_years": [
+          2017
+        ],
+        "required_documents": [
+          "sber_2017"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "dividends_2017",
+            "any_of": [
+              "sber_2017:00368:c2:df79bfbefd40"
+            ],
+            "section": ""
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 2,
+        "max_tool_calls": 4,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "2017"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": ""
+    },
+    {
+      "id": "medium_005",
+      "suite": "medium",
+      "split": "holdout",
+      "category": "fact_lookup",
+      "difficulty": "medium",
+      "tags": [
+        "dividends",
+        "numeric"
+      ],
+      "question": "Какой размер дивиденда на акцию был объявлен по итогам 2023 года?",
+      "filters": {
+        "years": [
+          2024
+        ],
+        "allowed_doc_ids": [
+          "sber_2024"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "33,3 рубля на акцию.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "dividends_per_share",
+            "metric_aliases": [
+              "дивиденд на акцию",
+              "дивиденды на акцию"
+            ],
+            "year": 2023,
+            "value": 33.3,
+            "unit": "руб.",
+            "unit_aliases": [
+              "рублей",
+              "руб",
+              "₽"
+            ],
+            "tolerance": 0.005
+          }
+        ],
+        "required_years": [
+          2024
+        ],
+        "required_documents": [
+          "sber_2024"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "dividends_2023",
+            "any_of": [
+              "sber_2024:04220:c0:ef833ca6f560",
+              "sber_2024:04065:c1:8c077eac21e9"
+            ],
+            "section": ""
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 2,
+        "max_tool_calls": 4,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "2023"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": ""
+    },
+    {
+      "id": "medium_006",
+      "suite": "medium",
+      "split": "holdout",
+      "category": "fact_lookup",
+      "difficulty": "medium",
+      "tags": [
+        "dividends",
+        "numeric"
+      ],
+      "question": "Какой размер дивиденда на акцию был объявлен по итогам 2024 года?",
+      "filters": {
+        "years": [
+          2025
+        ],
+        "allowed_doc_ids": [
+          "sber_2025"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "34,84 рубля на акцию.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "dividends_per_share",
+            "metric_aliases": [
+              "дивиденд на акцию",
+              "дивиденды на акцию"
+            ],
+            "year": 2024,
+            "value": 34.84,
+            "unit": "руб.",
+            "unit_aliases": [
+              "рублей",
+              "руб",
+              "₽"
+            ],
+            "tolerance": 0.005
+          }
+        ],
+        "required_years": [
+          2025
+        ],
+        "required_documents": [
+          "sber_2025"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "dividends_2024",
+            "any_of": [
+              "sber_2025:06056:c0:4ab5ea1c02d7",
+              "sber_2025:06045:c0:d7fa8b834c18",
+              "sber_2025:06055:c0:a858510048e0"
+            ],
+            "section": ""
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 2,
+        "max_tool_calls": 4,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "2024"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": ""
+    },
+    {
+      "id": "medium_007",
+      "suite": "medium",
+      "split": "holdout",
+      "category": "fact_lookup",
+      "difficulty": "medium",
+      "tags": [
+        "clients",
+        "numeric"
+      ],
+      "question": "Сколько активных розничных клиентов было у Сбера в 2019 году?",
+      "filters": {
+        "years": [
+          2019
+        ],
+        "allowed_doc_ids": [
+          "sber_2019"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "96,2 млн клиентов.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "retail_clients",
+            "metric_aliases": [
+              "розничные клиенты",
+              "активные клиенты"
+            ],
+            "year": 2019,
+            "value": 96.2,
+            "unit": "млн",
+            "unit_aliases": [
+              "млн человек",
+              "млн клиентов"
+            ],
+            "tolerance": 0.05
+          }
+        ],
+        "required_years": [
+          2019
+        ],
+        "required_documents": [
+          "sber_2019"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "clients_2019",
+            "any_of": [
+              "sber_2019:00392:c0:275b7714ba8e",
+              "sber_2019:00180:c0:7e0cfa61e73d",
+              "sber_2019:00495:c0:24f282bd0f01",
+              "sber_2019:00705:c4:91e060e9dbe4"
+            ],
+            "section": ""
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 2,
+        "max_tool_calls": 4,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "2019"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": ""
+    },
+    {
+      "id": "medium_008",
+      "suite": "medium",
+      "split": "holdout",
+      "category": "fact_lookup",
+      "difficulty": "medium",
+      "tags": [
+        "clients",
+        "numeric"
+      ],
+      "question": "Сколько активных розничных клиентов было у Сбера в 2024 году?",
+      "filters": {
+        "years": [
+          2024
+        ],
+        "allowed_doc_ids": [
+          "sber_2024"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "109,9 млн клиентов.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "retail_clients",
+            "metric_aliases": [
+              "розничные клиенты",
+              "активные клиенты"
+            ],
+            "year": 2024,
+            "value": 109.9,
+            "unit": "млн",
+            "unit_aliases": [
+              "млн человек",
+              "млн клиентов"
+            ],
+            "tolerance": 0.05
+          }
+        ],
+        "required_years": [
+          2024
+        ],
+        "required_documents": [
+          "sber_2024"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "clients_2024",
+            "any_of": [
+              "sber_2024:00137:c0:8e2cdd3d2dae",
+              "sber_2024:00474:c0:214b9ea662c5",
+              "sber_2024:04065:c0:7a26392f3bfb"
+            ],
+            "section": ""
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 2,
+        "max_tool_calls": 4,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "2024"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": ""
+    }
+  ]
+}

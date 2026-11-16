@@ -72,7 +72,6 @@ def _env_origins(env: Mapping[str, str]) -> tuple[str, ...]:
 class ApiConfig:
     """Настройки adapter'а. Секретов здесь нет и быть не должно."""
 
-    auth_mode: str = "local"
     db_path: Path = DEFAULT_DB_PATH
     source_registry_path: Path = DEFAULT_SOURCE_REGISTRY
     corpus_name: str = "Локальный корпус"
@@ -89,7 +88,6 @@ class ApiConfig:
     page_size_default: int = 50
     page_size_max: int = 200
     request_title_limit: int = 200
-    history_retention_days: int | None = None
     rate_limit_per_minute: int = 120
     contract_version: str = "1"
     #: Same-origin SPA. По умолчанию выключено: API не обязан раздавать фронтенд,
@@ -105,10 +103,8 @@ class ApiConfig:
     eval_db_path: Path = DEFAULT_EVAL_DB_PATH
     eval_results_dir: Path = DEFAULT_EVAL_RESULTS_DIR
     eval_datasets_dir: Path = DEFAULT_EVAL_DATASETS_DIR
-    eval_max_concurrency: int = 1
     eval_queue_size: int = 3
     eval_retention_runs: int = 50
-    eval_yield_ms: int = 250
     eval_turn_timeout_s: float = 300.0
     eval_run_timeout_s: float = 7_200.0
     #: Offline-режим для локальной проверки инфраструктуры: артефакты помечаются
@@ -117,7 +113,7 @@ class ApiConfig:
     eval_judge_enabled: bool = False
 
     def capabilities_modes(self) -> tuple[str, ...]:
-        """Retrieval-режимы, реально поддержанные benchmark-контуром."""
+        """Retrieval-режимы, объявленные adapter'ом для benchmark-контура."""
         return ("hybrid", "dense", "keyword")
 
     def judge_available(self) -> bool:
@@ -125,6 +121,7 @@ class ApiConfig:
         return bool(self.eval_judge_enabled)
 
     def eval_cancel_available(self) -> bool:
+        """Доступна ли отмена evaluation-прогонов."""
         return bool(self.eval_ui_enabled)
 
     def with_overrides(self, **kwargs: object) -> "ApiConfig":
@@ -139,17 +136,7 @@ def load_api_config(env: Mapping[str, str] | None = None) -> ApiConfig:
     ошибка конфигурации не должна блокировать запуск health-проверки.
     """
     source = os.environ if env is None else env
-    retention_raw = source.get("API_HISTORY_RETENTION_DAYS")
-    try:
-        retention = (
-            int(retention_raw)
-            if retention_raw is not None and int(retention_raw) > 0
-            else None
-        )
-    except (TypeError, ValueError):
-        retention = None
     return ApiConfig(
-        auth_mode=_env(source, "AUTH_MODE", "local"),
         db_path=Path(_env(source, "API_DB_PATH", str(DEFAULT_DB_PATH))),
         source_registry_path=Path(
             _env(source, "API_SOURCE_REGISTRY_PATH", str(DEFAULT_SOURCE_REGISTRY))
@@ -170,7 +157,6 @@ def load_api_config(env: Mapping[str, str] | None = None) -> ApiConfig:
         page_size_default=_env_int(source, "API_PAGE_SIZE_DEFAULT", 50),
         page_size_max=_env_int(source, "API_PAGE_SIZE_MAX", 200),
         rate_limit_per_minute=_env_int(source, "API_RATE_LIMIT_PER_MINUTE", 120),
-        history_retention_days=retention,
         serve_spa=_env_bool(source, "API_SERVE_SPA", False),
         spa_dist_dir=Path(
             _env(source, "API_SPA_DIST_DIR", str(DEFAULT_FRONTEND_DIST))
@@ -188,10 +174,8 @@ def load_api_config(env: Mapping[str, str] | None = None) -> ApiConfig:
         eval_datasets_dir=Path(
             _env(source, "EVAL_DATASETS_DIR", str(DEFAULT_EVAL_DATASETS_DIR))
         ),
-        eval_max_concurrency=_env_int(source, "EVAL_MAX_CONCURRENCY", 1),
         eval_queue_size=_env_int(source, "EVAL_QUEUE_SIZE", 3),
         eval_retention_runs=_env_int(source, "EVAL_RETENTION_RUNS", 50),
-        eval_yield_ms=_env_int(source, "EVAL_YIELD_MS", 250),
         eval_turn_timeout_s=_env_float(source, "EVAL_TURN_TIMEOUT_S", 300.0),
         eval_run_timeout_s=_env_float(source, "EVAL_RUN_TIMEOUT_S", 7_200.0),
         eval_fake_service=_env_bool(source, "EVAL_FAKE_SERVICE", False),

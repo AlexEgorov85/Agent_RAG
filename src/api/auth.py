@@ -20,15 +20,18 @@ _UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
 def new_owner_id() -> str:
+    """Сгенерировать непрозрачный ID владельца."""
     return uuid.uuid4().hex
 
 
 def config_from(request: Request) -> ApiConfig:
+    """Достать конфигурацию API из состояния приложения."""
     config = getattr(request.app.state, "config", None)
     return config if isinstance(config, ApiConfig) else ApiConfig()
 
 
 def owner_from_cookie(request: Request, config: ApiConfig) -> str | None:
+    """Прочитать ``owner_id`` из HttpOnly cookie."""
     raw = request.cookies.get(config.cookie_name)
     if isinstance(raw, str) and _OWNER_PATTERN.fullmatch(raw):
         return raw
@@ -45,6 +48,7 @@ def _origin_allowed(origin: str, request: Request, config: ApiConfig) -> bool:
 
 
 def check_csrf(request: Request, config: ApiConfig) -> None:
+    """Проверить same-origin/CSRF для изменяющего запроса."""
     if request.method.upper() not in _UNSAFE_METHODS:
         return
     origin = request.headers.get("origin")

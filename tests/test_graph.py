@@ -204,7 +204,7 @@ def test_failed_atomic_graph_save_preserves_existing_target(tmp_path, monkeypatc
     def fail_replace(_source, _target):
         raise OSError("simulated replace failure")
 
-    monkeypatch.setattr("src.graph.graph_builder.os.replace", fail_replace)
+    monkeypatch.setattr("src.core.io.os.replace", fail_replace)
     with pytest.raises(OSError, match="simulated"):
         save_graph(result, target)
 

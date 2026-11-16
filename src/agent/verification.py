@@ -16,14 +16,19 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+
+from src.core.record import chunk_text as _text
+from src.core.record import field_value as _chunk_field
 from typing import Any, Literal
 
 from src.agent.coverage import (
     METRIC_ALIASES,
     CoverageReport,
     metric_label,
+    normalize_metric,
 )
 from src.agent.state import Answer, QueryPlan
+from src.core.metrics_table import load_index
 from src.engine.calculations import parse_number
 
 Severity = Literal["fatal", "warning"]
@@ -93,6 +98,7 @@ _GAP_WINDOW = 120
 
 @dataclass(frozen=True)
 class VerificationIssue:
+    """Одна проблема проверки ответа."""
     code: str
     severity: Severity
     message: str
@@ -106,9 +112,11 @@ class VerificationIssue:
 
     @property
     def is_fatal(self) -> bool:
+        """Блокирует ли проблема ответ."""
         return self.severity in _FATAL_SEVERITIES
 
     def to_dict(self) -> dict[str, Any]:
+        """JSON-представление проблемы."""
         return {
             "code": self.code,
             "severity": self.severity,
@@ -123,6 +131,7 @@ class VerificationIssue:
 
 @dataclass(frozen=True)
 class VerificationResult:
+    """Итог проверки ответа с issues и статусом."""
     status: Status
     issues: list[VerificationIssue] = field(default_factory=list)
     supported_citations: list[str] = field(default_factory=list)
@@ -134,6 +143,7 @@ class VerificationResult:
         return self.status != "failed"
 
     def to_dict(self) -> dict[str, Any]:
+        """JSON-представление результата проверки."""
         return {
             "status": self.status,
             "ok": self.ok,
@@ -141,18 +151,6 @@ class VerificationResult:
             "supported_citations": list(self.supported_citations),
             "unsupported_facts": list(self.unsupported_facts),
         }
-
-
-def _text(chunk: Any) -> str:
-    if isinstance(chunk, Mapping):
-        return f"{chunk.get('text', '')} {chunk.get('html', '')}"
-    return f"{getattr(chunk, 'text', '')} {getattr(chunk, 'html', '')}"
-
-
-def _chunk_field(chunk: Any, name: str) -> Any:
-    if isinstance(chunk, Mapping):
-        return chunk.get(name)
-    return getattr(chunk, name, None)
 
 
 def _normalize(text: str) -> str:
@@ -217,6 +215,14 @@ def _values_match(
     if left_scale is not None and right_scale is not None:
         return _same_number(left * left_scale, right * right_scale)
     return False
+
+
+def _value_in_report(value: float, report_values: Iterable[float]) -> bool:
+    """Есть ли такое число среди табличных значений этого года."""
+    return any(
+        abs(candidate - value) <= max(0.005, abs(value) * 1e-4)
+        for candidate in report_values
+    )
 
 
 def _has_value(
@@ -474,6 +480,199 @@ def _narrative(text: str) -> str:
     return text[:marker] if marker >= 0 else text
 
 
+def _sentence_spans(text: str) -> list[tuple[int, int]]:
+    """Границы предложений: для привязки числа к году рядом с ним."""
+    spans: list[tuple[int, int]] = []
+    start = 0
+    for match in re.finditer(r"[.!?](?=\s|$)", text):
+        end = match.end()
+        if end > start:
+            spans.append((start, end))
+        start = end
+    if start < len(text):
+        spans.append((start, len(text)))
+    return spans
+
+
+_PERCENT_AFTER = re.compile(r"^[\s\u00a0]*(?:%|процент|п\.\s*п\.)", re.I)
+_GROWTH_WORD = re.compile(
+    r"вырос\w*|выраст\w*|снизил\w*|снизил\w*|рост\w*|падени\w*|"
+    r"увелич\w*|уменьш\w*|изменил\w*|динамик\w*",
+    re.I,
+)
+_PP_MARKER = re.compile(r"п\.\s*п\.|процентн\w*\s+пункт", re.I)
+
+
+def _is_percent_claim(text: str, end: int) -> bool:
+    return _PERCENT_AFTER.search(text[end : end + 12]) is not None
+
+
+def _derived_values(
+    facts_metric_year: Mapping[str, Mapping[int, float]],
+    years: Iterable[int],
+) -> list[float]:
+    """Производные значения из фактов: разницы и проценты по парам лет.
+
+    В ответе законны не только исходные значения, но и «−84,7 млрд» или «−10%»,
+    посчитанные по подтверждённым фактам. Их нельзя требовать из таблиц.
+    """
+    ordered = sorted(set(years))
+    derived: list[float] = []
+    for per_metric in facts_metric_year.values():
+        for first_index, first in enumerate(ordered):
+            if first not in per_metric:
+                continue
+            for second in ordered[first_index + 1:]:
+                if second not in per_metric:
+                    continue
+                base = per_metric[first]
+                last = per_metric[second]
+                derived.append(last - base)
+                if base:
+                    derived.append((last - base) / base * 100)
+                    derived.append(last / base)
+    return derived
+
+
+def _narrative_year_issues(
+    narrative: str,
+    *,
+    facts_by_year: Mapping[int, list[tuple[str | None, float, float | None]]],
+    facts_metric_year: Mapping[str, Mapping[int, float]],
+    report_values: Mapping[int, list[float]],
+    metrics_by_metric: Mapping[str, Mapping[int, Mapping[str, Any]]],
+    cited_chunk_ids: set[str],
+) -> list["VerificationIssue"]:
+    """Проверить, что число относится к году, за который оно приведено.
+
+    Год берётся как ближайший к числу в предложении, а подтверждение — из
+    структурного индекса табличных значений (шапка таблицы с годами) и из
+    фактов ответа. Свободный текст чанка здесь не используется: именно из-за
+    него «845,0 831,7» из таблицы 2019 года превращалось в прибыль 2020-го.
+    """
+    issues: list[VerificationIssue] = []
+    for start, end in _sentence_spans(narrative):
+        sentence = narrative[start:end]
+        year_spans = [
+            (int(match.group(0)), match.start(), match.end())
+            for match in _YEAR.finditer(sentence)
+        ]
+        if not year_spans:
+            continue
+        sentence_metric = normalize_metric(sentence)
+        years = {year for year, _start, _end in year_spans}
+        derived = _derived_values(facts_metric_year, years)
+        for value, token_start, token_end in _number_tokens(sentence):
+            absolute_end = start + token_end
+            scale = _scale_near(narrative, absolute_end)
+            marked = _numeric_claim_marker(narrative, absolute_end)
+            if _is_year_token(
+                value, scale, marked, text=narrative,
+                start=start + token_start, end=absolute_end,
+            ):
+                continue
+            if not (
+                scale is not None
+                or marked
+                or abs(value) >= 1000
+                or not float(value).is_integer()
+            ):
+                continue
+            nearest_year = min(
+                year_spans,
+                key=lambda item: min(
+                    abs(token_start - item[1]), abs(token_end - item[2])
+                ),
+            )[0]
+            literal = _normalize(sentence[token_start:token_end])
+            supported_by_fact = any(
+                _values_match(value, scale, fact_value, fact_scale)
+                for _metric, fact_value, fact_scale
+                in facts_by_year.get(nearest_year, [])
+            )
+            if supported_by_fact:
+                continue
+            if any(
+                abs(candidate - value) <= max(0.05, abs(value) * 0.005)
+                for candidate in derived
+            ):
+                # Разница/процент, посчитанные по фактам этих лет.
+                continue
+            table_metric = (
+                metrics_by_metric.get(sentence_metric, {}).get(nearest_year)
+                if sentence_metric
+                else None
+            )
+            if table_metric is not None:
+                expected = float(table_metric.get("value"))
+                if _values_match(value, scale, expected, _unit_scale(table_metric.get("unit"))):
+                    continue
+                issues.append(
+                    VerificationIssue(
+                        "numeric_claim_contradicts_table",
+                        "fatal",
+                        f"Для «{metric_label(sentence_metric)}» за {nearest_year} год "
+                        f"в таблице отчёта указано {expected:g}"
+                        f"{(' ' + str(table_metric.get('unit'))) if table_metric.get('unit') else ''}, "
+                        f"а в ответе — {literal}.",
+                        sorted(cited_chunk_ids),
+                    )
+                )
+                continue
+            year_values = report_values.get(nearest_year)
+            if not year_values:
+                # Для этого года структурного индекса нет: не блокируем ответ,
+                # ниже сработает общая проверка чисел по цитатам.
+                continue
+            if _value_in_report(value, year_values):
+                continue
+            issues.append(
+                VerificationIssue(
+                    "numeric_claim_year_mismatch",
+                    "fatal",
+                    f"Число «{literal}» отнесено к {nearest_year} году, но в "
+                    "таблицах и фактах этого года его нет.",
+                    sorted(cited_chunk_ids),
+                )
+            )
+        # Темп роста: если в предложении два года, есть слово роста и процент,
+        # значение должно совпадать с расчётом по фактам этих лет.
+        if (
+            len(years) >= 2
+            and _GROWTH_WORD.search(sentence)
+            and not _PP_MARKER.search(sentence)
+        ):
+            ordered = sorted(years)
+            first, last = ordered[0], ordered[-1]
+            expected_values = [
+                (per_metric[last] - per_metric[first]) / per_metric[first] * 100
+                for per_metric in facts_metric_year.values()
+                if first in per_metric
+                and last in per_metric
+                and per_metric[first]
+            ]
+            if expected_values:
+                for value, token_start, token_end in _number_tokens(sentence):
+                    absolute_end = start + token_end
+                    if not _is_percent_claim(narrative, absolute_end):
+                        continue
+                    if any(abs(value - expected) <= 1.0 for expected in expected_values):
+                        continue
+                    literal = _normalize(sentence[token_start:token_end])
+                    issues.append(
+                        VerificationIssue(
+                            "growth_rate_mismatch",
+                            "fatal",
+                            f"Темп роста «{literal}%» не совпадает с расчётом "
+                            f"по фактам {first}→{last}: "
+                            + ", ".join(f"{expected:+.1f}%" for expected in expected_values)
+                            + ".",
+                            sorted(cited_chunk_ids),
+                        )
+                    )
+    return issues
+
+
 def verify_answer(
     answer: Answer,
     evidence: Mapping[str, Mapping[str, Any]],
@@ -528,6 +727,9 @@ def verify_answer(
     fact_values: list[float] = []
     fact_scales: list[float | None] = []
     unsupported_facts: list[int] = []
+    facts_by_year: dict[int, list[tuple[str | None, float, float | None]]] = {}
+    facts_metric_year: dict[str, dict[int, float]] = {}
+    fact_metrics: set[str] = set()
 
     for index, fact in enumerate(answer.facts):
         if not isinstance(fact, Mapping):
@@ -551,7 +753,7 @@ def verify_answer(
             for chunk_id in chunk_ids
             if chunk_id in evidence
         ]
-        # Кэш chunk_id → текст: у больших ответов факты часто делят чанки.
+        # Текст всех чанков факта: у больших ответов факты часто делят чанки.
         source_text = " ".join(_text(chunk) for chunk in chunks)
         fact_scales_value = _unit_scale(fact.get("unit"))
         value = _fact_value(fact)
@@ -559,6 +761,8 @@ def verify_answer(
 
         metric = _fact_metric(fact)
         if isinstance(metric, str):
+            canonical = normalize_metric(metric) or metric.casefold()
+            fact_metrics.add(canonical)
             unit = fact.get("unit")
             if isinstance(unit, str) and unit.strip():
                 units.setdefault(metric.casefold(), set()).add(
@@ -585,6 +789,12 @@ def verify_answer(
         year = _fact_year(fact)
         if year is not None:
             fact_years.add(year)
+            if value is not None:
+                facts_by_year.setdefault(year, []).append(
+                    (metric if isinstance(metric, str) else None, value, fact_scales_value)
+                )
+                if isinstance(metric, str):
+                    facts_metric_year.setdefault(metric.casefold(), {})[year] = value
             source_years: set[int] = set()
             for chunk in chunks:
                 source_years.update(_years(_text(chunk)))
@@ -662,6 +872,47 @@ def verify_answer(
                 "unit_mismatch",
                 "warning",
                 "Одна метрика приведена в разных единицах.",
+            )
+        )
+
+    if plan is not None:
+        required = {
+            str(metric).casefold()
+            for metric in (getattr(plan, "required_metrics", None) or [])
+            if str(metric).strip()
+        }
+        if required and fact_metrics and not (required & fact_metrics):
+            issues.append(
+                VerificationIssue(
+                    "required_metric_missing",
+                    "fatal",
+                    "Ответ построен не по метрике вопроса: ожидалось "
+                    + ", ".join(sorted(required))
+                    + ", факты — "
+                    + ", ".join(sorted(fact_metrics))
+                    + ".",
+                )
+            )
+
+    metrics_index = load_index()
+    report_values: dict[int, list[float]] = (
+        metrics_index.values_by_year if metrics_index is not None else {}
+    )
+    narrative = _narrative(answer.answer or "")
+    indexed_citations = (
+        cited & set(metrics_index.chunks) if metrics_index is not None else set()
+    )
+    if indexed_citations:
+        issues.extend(
+            _narrative_year_issues(
+                narrative,
+                facts_by_year=facts_by_year,
+                facts_metric_year=facts_metric_year,
+                report_values=report_values,
+                metrics_by_metric=(
+                    metrics_index.by_metric if metrics_index is not None else {}
+                ),
+                cited_chunk_ids=cited,
             )
         )
 

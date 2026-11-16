@@ -109,7 +109,7 @@ def retrieve_graph(
             if proof:
                 if include_relation_evidence:
                     _add_relation_candidates(
-                        candidates, graph, node_id, source, proof, evidence, path,
+                        candidates, graph, source, proof, evidence, path,
                         depth + 1,
                     )
                 neighbors.append((source, proof))
@@ -123,7 +123,7 @@ def retrieve_graph(
             if proof:
                 if include_relation_evidence:
                     _add_relation_candidates(
-                        candidates, graph, node_id, target, proof, evidence, path,
+                        candidates, graph, target, proof, evidence, path,
                         depth + 1,
                     )
                 neighbors.append((target, proof))
@@ -316,7 +316,6 @@ def _eligible_evidence(
 def _add_relation_candidates(
     candidates: dict[str, dict[str, Any]],
     graph: nx.MultiDiGraph,
-    current_entity: str,
     related_entity: str,
     evidence_ids: tuple[str, ...],
     prior_evidence: tuple[str, ...],

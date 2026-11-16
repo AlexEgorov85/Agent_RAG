@@ -1,0 +1,930 @@
+{
+  "schema_version": "1.1",
+  "suite": "hard",
+  "expected_corpus_sha256": "c70aabb541d07f2d5e4e7da477521e9f2e50bfb63abaf89d8c0a459a5d227154",
+  "tests": [
+    {
+      "id": "hard_001",
+      "suite": "hard",
+      "split": "dev",
+      "category": "abstain",
+      "difficulty": "hard",
+      "tags": [
+        "abstain",
+        "gap_year"
+      ],
+      "question": "Какая чистая прибыль Сбербанка за 2021 год?",
+      "filters": {
+        "years": [
+          2021
+        ]
+      },
+      "expected_status": "abstain",
+      "reference_answer": "Отчёта за 2021 год в корпусе нет, ответить нельзя.",
+      "expected": {
+        "required_facts": [],
+        "required_years": [
+          2021
+        ],
+        "required_documents": [],
+        "required_issuers": [],
+        "required_answer_elements": [],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": [
+          2021
+        ]
+      },
+      "gold_evidence": {
+        "min_coverage": 0.0,
+        "groups": []
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 1,
+        "max_tool_calls": 3,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": false,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [
+          "missing_year"
+        ],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "2021 год физически отсутствует в корпусе."
+    },
+    {
+      "id": "hard_002",
+      "suite": "hard",
+      "split": "dev",
+      "category": "abstain",
+      "difficulty": "hard",
+      "tags": [
+        "abstain",
+        "gap_year",
+        "dividends"
+      ],
+      "question": "Какие дивиденды на акцию были выплачены по итогам 2021 года?",
+      "filters": {
+        "years": [
+          2021
+        ]
+      },
+      "expected_status": "abstain",
+      "reference_answer": "Отчёта за 2021 год в корпусе нет, ответить нельзя.",
+      "expected": {
+        "required_facts": [],
+        "required_years": [
+          2021
+        ],
+        "required_documents": [],
+        "required_issuers": [],
+        "required_answer_elements": [],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": [
+          2021
+        ]
+      },
+      "gold_evidence": {
+        "min_coverage": 0.0,
+        "groups": []
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 1,
+        "max_tool_calls": 3,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": false,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [
+          "missing_year"
+        ],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": ""
+    },
+    {
+      "id": "hard_003",
+      "suite": "hard",
+      "split": "dev",
+      "category": "multi_hop",
+      "difficulty": "hard",
+      "tags": [
+        "comparison",
+        "net_profit",
+        "growth"
+      ],
+      "question": "Во сколько раз выросла чистая прибыль Группы с 2020 по 2025 год?",
+      "filters": {
+        "years": [
+          2020,
+          2025
+        ],
+        "allowed_doc_ids": [
+          "sber_2020",
+          "sber_2025"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "С 760,3 до 1 705,9 млрд рублей, примерно в 2,24 раза.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "net_profit",
+            "metric_aliases": [
+              "чистая прибыль"
+            ],
+            "year": 2020,
+            "value": 760.3,
+            "unit": "млрд руб.",
+            "unit_aliases": [
+              "млрд рублей",
+              "млрд руб"
+            ],
+            "tolerance": 0.01
+          },
+          {
+            "metric": "net_profit",
+            "metric_aliases": [
+              "чистая прибыль"
+            ],
+            "year": 2025,
+            "value": 1705.9,
+            "unit": "млрд руб.",
+            "unit_aliases": [
+              "млрд рублей",
+              "млрд руб"
+            ],
+            "tolerance": 0.01
+          }
+        ],
+        "required_years": [
+          2020,
+          2025
+        ],
+        "required_documents": [
+          "sber_2020",
+          "sber_2025"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "net_profit_2020",
+            "any_of": [
+              "sber_2020:03905:c0:3c7a954ad022",
+              "sber_2020:00618:c0:b6a6a13b4d23",
+              "sber_2020:03867:c0:a83f325325f6",
+              "sber_2020:03910:c0:d0d23cbfadc5",
+              "sber_2020:04737:c0:4a2d61f1a3d7",
+              "sber_2020:04817:c0:e80b3c655e7d"
+            ],
+            "section": ""
+          },
+          {
+            "id": "net_profit_2025",
+            "any_of": [
+              "sber_2025:00070:c0:00dabc46d736",
+              "sber_2025:04212:c0:305872c43506",
+              "sber_2025:04237:c1:f00478933e74",
+              "sber_2025:04249:c0:a0eb8021225e",
+              "sber_2025:06954:c0:453c6bf65cb1",
+              "sber_2025:06963:c0:f6a09057d36e"
+            ],
+            "section": ""
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 3,
+        "max_tool_calls": 5,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "2020",
+          "2025"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": ""
+    },
+    {
+      "id": "hard_004",
+      "suite": "hard",
+      "split": "dev",
+      "category": "multi_hop",
+      "difficulty": "hard",
+      "tags": [
+        "comparison",
+        "net_profit"
+      ],
+      "question": "Сравни чистую прибыль за 2022 и 2023 годы: во сколько раз она изменилась?",
+      "filters": {
+        "years": [
+          2022,
+          2023
+        ],
+        "allowed_doc_ids": [
+          "sber_2022",
+          "sber_2023"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "С 270,5 млрд рублей в 2022 году до 1 508,6 млрд рублей в 2023-м, в 5,2 раза.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "net_profit",
+            "metric_aliases": [
+              "чистая прибыль"
+            ],
+            "year": 2022,
+            "value": 270.5,
+            "unit": "млрд руб.",
+            "unit_aliases": [
+              "млрд рублей",
+              "млрд руб"
+            ],
+            "tolerance": 0.01
+          },
+          {
+            "metric": "net_profit",
+            "metric_aliases": [
+              "чистая прибыль"
+            ],
+            "year": 2023,
+            "value": 1508.6,
+            "unit": "млрд руб.",
+            "unit_aliases": [
+              "млрд рублей",
+              "млрд руб"
+            ],
+            "tolerance": 0.01
+          }
+        ],
+        "required_years": [
+          2022,
+          2023
+        ],
+        "required_documents": [
+          "sber_2022",
+          "sber_2023"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "net_profit_2022",
+            "any_of": [
+              "sber_2022:01988:c0:544166770eee",
+              "sber_2022:00363:c0:b2aafe221c8b",
+              "sber_2022:01954:c0:c11d36137ea7",
+              "sber_2022:01998:c0:b413d400bfb9",
+              "sber_2022:03955:c0:27bc1310aa35",
+              "sber_2022:03959:c0:68b87dbd645d"
+            ],
+            "section": ""
+          },
+          {
+            "id": "net_profit_2023",
+            "any_of": [
+              "sber_2023:02177:c0:1aacabe279c5",
+              "sber_2023:00078:c3:c5cc6e1f46e2",
+              "sber_2023:02155:c0:ae8e7681bb66",
+              "sber_2023:02180:c0:cece0f56f420",
+              "sber_2023:03797:c0:9147f4cb3176",
+              "sber_2023:03805:c0:5bff9295a47d"
+            ],
+            "section": ""
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 3,
+        "max_tool_calls": 5,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "2022",
+          "2023"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": ""
+    },
+    {
+      "id": "hard_005",
+      "suite": "hard",
+      "split": "holdout",
+      "category": "fact_lookup",
+      "difficulty": "hard",
+      "tags": [
+        "numeric",
+        "net_profit",
+        "issuer"
+      ],
+      "question": "Какая чистая прибыль БПС-Сбербанка за 2015 год?",
+      "filters": {
+        "years": [
+          2015
+        ],
+        "allowed_doc_ids": [
+          "sber_2015"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "190,4 млрд белорусских рублей.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "net_profit",
+            "metric_aliases": [
+              "чистая прибыль"
+            ],
+            "year": 2015,
+            "value": 190.4,
+            "unit": "млрд BYR",
+            "unit_aliases": [
+              "млрд белорусских рублей",
+              "BYR"
+            ],
+            "tolerance": 0.01
+          }
+        ],
+        "required_years": [
+          2015
+        ],
+        "required_documents": [
+          "sber_2015"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "net_profit_2015",
+            "any_of": [
+              "sber_2015:00867:c0:76abcf6dad47",
+              "sber_2015:00882:c0:8a5ec26c1d30"
+            ],
+            "section": ""
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 3,
+        "max_tool_calls": 5,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "2015"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": "2015 год — отчёт БПС-Сбербанка (Беларусь), несопоставим по эмитенту."
+    },
+    {
+      "id": "hard_006",
+      "suite": "hard",
+      "split": "dev",
+      "category": "multi_hop",
+      "difficulty": "hard",
+      "tags": [
+        "comparison",
+        "net_profit"
+      ],
+      "question": "На сколько процентов выросла чистая прибыль Группы с 2023 по 2024 год?",
+      "filters": {
+        "years": [
+          2023,
+          2024
+        ],
+        "allowed_doc_ids": [
+          "sber_2023",
+          "sber_2024"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "С 1 508,6 до 1 580,3 млрд рублей, рост на 4,8%.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "net_profit",
+            "metric_aliases": [
+              "чистая прибыль"
+            ],
+            "year": 2023,
+            "value": 1508.6,
+            "unit": "млрд руб.",
+            "unit_aliases": [
+              "млрд рублей",
+              "млрд руб"
+            ],
+            "tolerance": 0.01
+          },
+          {
+            "metric": "net_profit",
+            "metric_aliases": [
+              "чистая прибыль"
+            ],
+            "year": 2024,
+            "value": 1580.3,
+            "unit": "млрд руб.",
+            "unit_aliases": [
+              "млрд рублей",
+              "млрд руб"
+            ],
+            "tolerance": 0.01
+          }
+        ],
+        "required_years": [
+          2023,
+          2024
+        ],
+        "required_documents": [
+          "sber_2023",
+          "sber_2024"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "net_profit_2023",
+            "any_of": [
+              "sber_2023:02177:c0:1aacabe279c5",
+              "sber_2023:00078:c3:c5cc6e1f46e2",
+              "sber_2023:02155:c0:ae8e7681bb66",
+              "sber_2023:02180:c0:cece0f56f420",
+              "sber_2023:03797:c0:9147f4cb3176",
+              "sber_2023:03805:c0:5bff9295a47d"
+            ],
+            "section": ""
+          },
+          {
+            "id": "net_profit_2024",
+            "any_of": [
+              "sber_2024:02703:c1:5d346777e4b9",
+              "sber_2024:00069:c3:7041d451da67",
+              "sber_2024:02682:c0:7e775116b9b6",
+              "sber_2024:02710:c0:f933b9f0bd64",
+              "sber_2024:04928:c0:fd8bfedd1dad",
+              "sber_2024:04933:c0:aeb02ff7f4fd",
+              "sber_2024:04942:c0:ce8a1d5f48ca"
+            ],
+            "section": ""
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 3,
+        "max_tool_calls": 5,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "2023",
+          "2024"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": ""
+    },
+    {
+      "id": "hard_007",
+      "suite": "hard",
+      "split": "dev",
+      "category": "multi_hop",
+      "difficulty": "hard",
+      "tags": [
+        "comparison",
+        "net_profit",
+        "roe"
+      ],
+      "question": "Как изменились чистая прибыль и ROE с 2023 по 2025 год?",
+      "filters": {
+        "years": [
+          2023,
+          2025
+        ],
+        "allowed_doc_ids": [
+          "sber_2023",
+          "sber_2025"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "Прибыль выросла с 1 508,6 до 1 705,9 млрд рублей, ROE снизилась с 25,3% до 22,7%.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "net_profit",
+            "metric_aliases": [
+              "чистая прибыль"
+            ],
+            "year": 2023,
+            "value": 1508.6,
+            "unit": "млрд руб.",
+            "unit_aliases": [
+              "млрд рублей",
+              "млрд руб"
+            ],
+            "tolerance": 0.01
+          },
+          {
+            "metric": "net_profit",
+            "metric_aliases": [
+              "чистая прибыль"
+            ],
+            "year": 2025,
+            "value": 1705.9,
+            "unit": "млрд руб.",
+            "unit_aliases": [
+              "млрд рублей",
+              "млрд руб"
+            ],
+            "tolerance": 0.01
+          },
+          {
+            "metric": "roe",
+            "metric_aliases": [
+              "рентабельность капитала",
+              "ROE"
+            ],
+            "year": 2023,
+            "value": 25.3,
+            "unit": "%",
+            "unit_aliases": [
+              "процент",
+              "%"
+            ],
+            "tolerance": 0.01
+          },
+          {
+            "metric": "roe",
+            "metric_aliases": [
+              "рентабельность капитала",
+              "ROE"
+            ],
+            "year": 2025,
+            "value": 22.7,
+            "unit": "%",
+            "unit_aliases": [
+              "процент",
+              "%"
+            ],
+            "tolerance": 0.01
+          }
+        ],
+        "required_years": [
+          2023,
+          2025
+        ],
+        "required_documents": [
+          "sber_2023",
+          "sber_2025"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "net_profit_2023",
+            "any_of": [
+              "sber_2023:02177:c0:1aacabe279c5",
+              "sber_2023:00078:c3:c5cc6e1f46e2",
+              "sber_2023:02155:c0:ae8e7681bb66",
+              "sber_2023:02180:c0:cece0f56f420",
+              "sber_2023:03797:c0:9147f4cb3176",
+              "sber_2023:03805:c0:5bff9295a47d"
+            ],
+            "section": ""
+          },
+          {
+            "id": "net_profit_2025",
+            "any_of": [
+              "sber_2025:00070:c0:00dabc46d736",
+              "sber_2025:04212:c0:305872c43506",
+              "sber_2025:04237:c1:f00478933e74",
+              "sber_2025:04249:c0:a0eb8021225e",
+              "sber_2025:06954:c0:453c6bf65cb1",
+              "sber_2025:06963:c0:f6a09057d36e"
+            ],
+            "section": ""
+          },
+          {
+            "id": "roe_2023",
+            "any_of": [
+              "sber_2023:00078:c3:c5cc6e1f46e2",
+              "sber_2023:02163:c0:52f3272e800a"
+            ],
+            "section": ""
+          },
+          {
+            "id": "roe_2025",
+            "any_of": [
+              "sber_2025:00085:c0:edf9540651f3",
+              "sber_2025:00070:c0:00dabc46d736",
+              "sber_2025:00329:c0:60f62e8d503d",
+              "sber_2025:04220:c0:7ecffb2d0bc7"
+            ],
+            "section": ""
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 4,
+        "max_tool_calls": 6,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "2023",
+          "2025"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": ""
+    },
+    {
+      "id": "hard_008",
+      "suite": "hard",
+      "split": "holdout",
+      "category": "multi_hop",
+      "difficulty": "hard",
+      "tags": [
+        "comparison",
+        "clients"
+      ],
+      "question": "Как изменилось число активных розничных клиентов с 2019 по 2024 год?",
+      "filters": {
+        "years": [
+          2019,
+          2024
+        ],
+        "allowed_doc_ids": [
+          "sber_2019",
+          "sber_2024"
+        ]
+      },
+      "expected_status": "answer",
+      "reference_answer": "С 96,2 млн в 2019 году до 109,9 млн в 2024 году.",
+      "expected": {
+        "required_facts": [
+          {
+            "metric": "retail_clients",
+            "metric_aliases": [
+              "розничные клиенты",
+              "активные клиенты"
+            ],
+            "year": 2019,
+            "value": 96.2,
+            "unit": "млн",
+            "unit_aliases": [
+              "млн человек",
+              "млн клиентов"
+            ],
+            "tolerance": 0.05
+          },
+          {
+            "metric": "retail_clients",
+            "metric_aliases": [
+              "розничные клиенты",
+              "активные клиенты"
+            ],
+            "year": 2024,
+            "value": 109.9,
+            "unit": "млн",
+            "unit_aliases": [
+              "млн человек",
+              "млн клиентов"
+            ],
+            "tolerance": 0.05
+          }
+        ],
+        "required_years": [
+          2019,
+          2024
+        ],
+        "required_documents": [
+          "sber_2019",
+          "sber_2024"
+        ],
+        "required_issuers": [],
+        "required_answer_elements": [],
+        "required_calculations": [],
+        "required_structural_changes": [],
+        "missing_years": []
+      },
+      "gold_evidence": {
+        "min_coverage": 1.0,
+        "groups": [
+          {
+            "id": "clients_2019",
+            "any_of": [
+              "sber_2019:00392:c0:275b7714ba8e",
+              "sber_2019:00180:c0:7e0cfa61e73d",
+              "sber_2019:00495:c0:24f282bd0f01",
+              "sber_2019:00705:c4:91e060e9dbe4"
+            ],
+            "section": ""
+          },
+          {
+            "id": "clients_2024",
+            "any_of": [
+              "sber_2024:00137:c0:8e2cdd3d2dae",
+              "sber_2024:00474:c0:214b9ea662c5",
+              "sber_2024:04065:c0:7a26392f3bfb"
+            ],
+            "section": ""
+          }
+        ]
+      },
+      "expected_behavior": {
+        "retrieval_modes": [
+          "hybrid"
+        ],
+        "max_search_calls": 3,
+        "max_tool_calls": 5,
+        "must_use_tools": [
+          "search_reports"
+        ],
+        "must_use_tools_strict": false,
+        "may_use_tools": [
+          "get_chunk"
+        ],
+        "must_not_use_tools": [],
+        "strict_search_budget": false,
+        "must_cite_sources": true,
+        "must_abstain_if_missing": true
+      },
+      "checks": {
+        "must_mention": [
+          "2019",
+          "2024"
+        ],
+        "must_not_mention": [],
+        "forbidden_values": [],
+        "forbidden_years": [],
+        "expected_warnings": [],
+        "must_not_invent_values": true,
+        "strict_quotes": false
+      },
+      "notes": ""
+    }
+  ]
+}

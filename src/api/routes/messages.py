@@ -95,6 +95,7 @@ def list_messages(
     config: ApiConfig = Depends(get_config),
     store: Store = Depends(get_store),
 ) -> MessageListResponse:
+    """История сообщений исследования."""
     page_size = config.page_size_default if limit is None else limit
     if page_size > config.page_size_max:
         raise validation_error(
@@ -128,6 +129,7 @@ def send_message(
     services: Services = Depends(get_services),
     hub: EventHub = Depends(get_hub),
 ) -> MessageAccepted:
+    """Принять вопрос и запустить асинхронный ход."""
     if store.get_research(owner, research_id) is None:
         raise not_found("Диалог не найден.")
 

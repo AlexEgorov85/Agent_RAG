@@ -7,7 +7,7 @@ import json
 import pytest
 
 from src.core.cache import cached_document_vectors, corpus_fingerprint
-from src.core.embeddings import CourseEmbeddings
+from src.core.embeddings import ReportEmbeddings, make_embeddings_client
 
 
 class _EmbeddingsEndpoint:
@@ -53,9 +53,9 @@ def _chunks() -> list[dict[str, object]]:
     ]
 
 
-def test_course_embeddings_prefixes_only_queries_and_preserves_batch_order() -> None:
+def test_report_embeddings_prefixes_only_queries_and_preserves_batch_order() -> None:
     client = _Client()
-    embeddings = CourseEmbeddings(client, "test-model")
+    embeddings = ReportEmbeddings(client, "test-model")
 
     query = embeddings.embed_query("revenue")
     docs = embeddings.embed_documents(["alpha", "beta"])
@@ -68,19 +68,19 @@ def test_course_embeddings_prefixes_only_queries_and_preserves_batch_order() -> 
     ]
 
 
-def test_course_embeddings_reorders_indexed_response_and_rejects_malformed() -> None:
+def test_report_embeddings_reorders_indexed_response_and_rejects_malformed() -> None:
     class ReversedEndpoint:
         def create(self, **_kwargs: object) -> dict[str, object]:
             return {"data": [{"index": 1, "embedding": [2]}, {"index": 0, "embedding": [1]}]}
 
-    adapter = CourseEmbeddings(type("C", (), {"embeddings": ReversedEndpoint()})(), "m")
+    adapter = ReportEmbeddings(type("C", (), {"embeddings": ReversedEndpoint()})(), "m")
     assert adapter.embed_documents(["a", "b"]) == [[1.0], [2.0]]
 
     class BadEndpoint:
         def create(self, **_kwargs: object) -> dict[str, object]:
             return {"data": [{"index": 0, "embedding": ["bad"]}]}
 
-    bad = CourseEmbeddings(type("C", (), {"embeddings": BadEndpoint()})(), "m")
+    bad = ReportEmbeddings(type("C", (), {"embeddings": BadEndpoint()})(), "m")
     with pytest.raises(ValueError, match="non-numeric"):
         bad.embed_documents(["a"])
 
@@ -145,3 +145,38 @@ def test_invalid_non_finite_vectors_are_not_cached(tmp_path) -> None:
     with pytest.raises(ValueError, match="non-finite"):
         cached_document_vectors(_chunks(), BadVectors(), target, batch_size=8)
     assert not target.exists()
+
+
+def test_make_embeddings_client_prefers_separate_provider(monkeypatch) -> None:
+    for name in ("EMBED_BASE_URL", "EMBEDDINGS_BASE_URL", "EMBED_API_KEY",
+                 "NEURALDEEP_API_KEY", "LLM_BASE_URL", "LLM_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("EMBED_BASE_URL", "https://api.neuraldeep.ru/v1")
+    monkeypatch.setenv("EMBED_API_KEY", "sk-test")
+
+    client = make_embeddings_client(fallback_client=object())
+
+    assert str(client.base_url).rstrip("/") == "https://api.neuraldeep.ru/v1"
+    assert client.api_key == "sk-test"
+
+
+def test_make_embeddings_client_uses_fallback_without_separate_provider(
+    monkeypatch,
+) -> None:
+    for name in ("EMBED_BASE_URL", "EMBEDDINGS_BASE_URL", "EMBED_API_KEY",
+                 "NEURALDEEP_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    fallback = object()
+
+    assert make_embeddings_client(fallback_client=fallback) is fallback
+
+
+def test_make_embeddings_client_requires_key_for_separate_provider(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("EMBED_BASE_URL", "https://api.neuraldeep.ru/v1")
+    monkeypatch.delenv("EMBED_API_KEY", raising=False)
+    monkeypatch.delenv("NEURALDEEP_API_KEY", raising=False)
+
+    with pytest.raises(RuntimeError, match="EMBED_API_KEY"):
+        make_embeddings_client(fallback_client=object())

@@ -19,6 +19,7 @@ from src.api.streaming import EventHub
 
 
 def ensure_app_state(app: FastAPI) -> None:
+    """Лениво создать store/services/hub для приложения."""
     lock = getattr(app.state, "_bootstrap_lock", None)
     if lock is None:
         lock = threading.Lock()

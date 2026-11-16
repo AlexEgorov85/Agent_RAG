@@ -31,6 +31,7 @@ class ApiError(Exception):
         self.details = details or {}
 
     def payload(self) -> dict[str, Any]:
+        """Тело ошибки в едином конверте."""
         error: dict[str, Any] = {
             "code": self.code,
             "message": self.message,
@@ -43,17 +44,14 @@ class ApiError(Exception):
         return {"error": error}
 
 
-class NotFound(ApiError):
-    def __init__(self, message: str = "Диалог не найден.") -> None:
-        super().__init__(404, "not_found", message)
-
-
 class BackendUnavailable(ApiError):
+    """Backend RAG недоступен (503)."""
     def __init__(self, message: str = "Backend RAG недоступен.") -> None:
         super().__init__(503, "backend_unavailable", message, retryable=True)
 
 
 class RequestInProgress(ApiError):
+    """У исследования уже есть активный запрос (409)."""
     def __init__(self, active_request_id: str) -> None:
         super().__init__(
             409,
@@ -65,14 +63,17 @@ class RequestInProgress(ApiError):
 
 
 def validation_error(message: str = "Некорректные параметры запроса.") -> ApiError:
+    """Ошибка валидации 422."""
     return ApiError(422, "validation_error", message)
 
 
 def not_found(message: str = "Объект не найден.") -> ApiError:
+    """Ошибка 404 для отсутствующего объекта."""
     return ApiError(404, "not_found", message)
 
 
 def request_not_found(request_id: str | None = None) -> ApiError:
+    """Ошибка 404 для отсутствующего запроса."""
     return ApiError(
         404,
         "request_not_found",

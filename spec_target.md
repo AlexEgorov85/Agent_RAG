@@ -8,7 +8,7 @@
 > Этот документ фиксирует целевое поведение и критерии готовности. Он не утверждает,
 > что все описанные компоненты уже существуют. Backend-контур (ingestion, retrieval,
 > engine, агент), Streamlit UI, HTTP API, React WebUI этапов 1–4 и инфраструктура
-> benchmark реализованы; полный корпус 9 PDF, benchmark на полном корпусе и хвост
+> benchmark реализованы; полный корпус 10 PDF, benchmark на полном корпусе и хвост
 > этапа 5 React WebUI ещё не готовы. См. §2.
 
 ## 1. Цель и границы
@@ -39,7 +39,7 @@ Graph RAG — расширение retrieval, а не обязательный �
 
 | Слой | Сейчас | Целевое состояние |
 |---|---|---|
-| PDF ingestion | `pdf_parser.py`, модели/конфиг, CLI; батчевый `hi_res`/`fast`, OCR и resume; `source_registry`, `scripts/build_corpus.py`, `verify_corpus.py`. В `data/raw` 9 PDF; `elements` готовы для 2015–2018, документы 2019–2024 не парсились | Проверенные артефакты всех входных PDF, отчёт о пропусках/качестве |
+| PDF ingestion | `pdf_parser.py`, модели/конфиг, CLI; батчевый `hi_res`/`fast`, OCR и resume; `source_registry`, `scripts/build_corpus.py`, `verify_corpus.py`. В `data/raw` 10 PDF; `elements` и `chunks` готовы для всех 10 документов (13969 чанка, 2021 отсутствует) | Проверенные артефакты всех входных PDF, отчёт о пропусках/качестве |
 | Структура | `pdf_outline.py`, `structure_builder.py` (закладки → TOC → эвристика); sections для 2015–2018, для 2017 структура приблизительная | Воспроизводимое дерево для каждого обработанного отчёта |
 | Чанки | `pdf_to_chunks.py`, `chunk_enricher.py`, CLI; 3928 чанков для 2015–2018 (98% со структурой) и отдельный dev-корпус из 4 документов (1025 чанков) | Корпус чанков с метаданными, структурой и валидацией |
 | Dense/keyword retrieval | BM25 + dense, RRF, metadata/structure eligibility, filters, rewriting, diversity, `RetrievalTrace`; dense — постоянный FAISS `IndexFlatIP` с fallback на in-memory `DenseIndex` | Dense + BM25 с metadata/structure eligibility |
@@ -51,7 +51,7 @@ Graph RAG — расширение retrieval, а не обязательный �
 | Evaluation API | `/api/evaluation/*`: suites, runs, tests, trace, report, cancel, compare; 20 тестов; выключен по умолчанию (`EVAL_UI_ENABLED=0`), прогресс — polling, SSE нет | — |
 
 В текущем окружении проектные тесты проходят в `.venv` (Python 3.11.9):
-`854 passed` (снимок 15.11.2026); frontend — `160 passed` в 24 файлах,
+`863 passed` (снимок 15.11.2026); frontend — `160 passed` в 24 файлах,
 Playwright E2E — `7/7`, `tsc -b` и `vite build` без ошибок;
 `openspec validate --all --strict` проходит. Реальная приёмка dev-корпуса —
 4/4 (factoid, temporal, structural, abstain; снимок 02:44, после P1/P2 не
@@ -66,8 +66,8 @@ holdout 4/6), артефакт `eval/results/20261115_183541_0a97989/`. Пред
 
 Не готово:
 
-- полный корпус 9 PDF: документы 2019–2024 не парсились, производные артефакты
-  и `verify_corpus.py` относятся только к 2015–2018;
+- embeddings/FAISS для новых 10041 чанков: корпус спарсен (10/10, 13969 чанка,
+  `verify_corpus.py` без ошибок), но индексация новых чанков требует API;
 - полный graph index: `b288dd3c…` собран на 1916/3928 чанков и имеет
   `status=incomplete`; активен только dev-граф `a8ce50f6…` (536 чанков,
   2022–2023, 163 раздела);
@@ -285,7 +285,7 @@ country: str
 ### Этап A — достоверный корпус
 
 1. Проверить реестр источников, включая issuer 2015 и отсутствие 2021.
-2. Создать элементы, структуры и chunks для всех 9 документов либо зафиксировать
+2. Создать элементы, структуры и chunks для всех 10 документов либо зафиксировать
    обоснованное исключение по каждому недоступному документу.
 3. Выполнить `verify_corpus`: дубликаты ID, страницы вне PDF, пустые чанки,
    несогласованные HTML-таблицы, неполные source hashes, доля чанков без структуры.

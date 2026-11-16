@@ -23,20 +23,24 @@ Owner = Annotated[str, Depends(_owner)]
 
 
 def get_config(request: Request) -> ApiConfig:
+    """Конфигурация API из состояния приложения."""
     ensure_app_state(request.app)
     return config_from(request)
 
 
 def get_store(request: Request) -> Store:
+    """SQLite-хранилище исследований."""
     ensure_app_state(request.app)
     return request.app.state.store
 
 
 def get_services(request: Request) -> Services:
+    """Контейнер сервисов adapter'а."""
     ensure_app_state(request.app)
     return request.app.state.services
 
 
 def get_hub(request: Request) -> EventHub:
+    """EventHub активных запросов."""
     ensure_app_state(request.app)
     return request.app.state.hub

@@ -20,11 +20,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
-import os
 from pathlib import Path
 import re
-import tempfile
 from typing import Any, Iterable, Mapping, Sequence
+
+from src.core.io import atomic_write_text
 
 #: Корень проекта (``src/core/source_registry.py`` → parents[2]).
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -34,7 +34,7 @@ DEFAULT_REGISTRY_PATH = PROJECT_ROOT / "data" / "source_registry.json"
 
 #: Целевой состав корпуса (``spec_target.md`` §3.1); 2021 отсутствует.
 TARGET_YEARS: tuple[int, ...] = (
-    2015, 2016, 2017, 2018, 2019, 2020, 2022, 2023, 2024,
+    2015, 2016, 2017, 2018, 2019, 2020, 2022, 2023, 2024, 2025,
 )
 
 #: Годы, которых в корпусе быть не должно.
@@ -165,11 +165,6 @@ class SourceRecord:
     def is_comparable(self) -> bool:
         """Сопоставим ли источник с остальным корпусом ПАО Сбербанк."""
         return self.source_status == SOURCE_STATUS_COMPARABLE
-
-    @property
-    def relative_file_path(self) -> Path:
-        """Путь к файлу относительно корня проекта (абсолютный — как есть)."""
-        return Path(self.file_path)
 
 
 @dataclass(frozen=True)
@@ -322,24 +317,8 @@ def save_registry(
     if notes is not None:
         payload["notes"] = notes
     text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
-    _atomic_write_text(registry_path, text)
+    atomic_write_text(registry_path, text)
     return registry_path
-
-
-def _atomic_write_text(path: Path, text: str) -> None:
-    """Записать текст через временный файл рядом с целевым и ``os.replace``."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temp_name = tempfile.mkstemp(
-        prefix=f".{path.stem}.", suffix=".tmp", dir=path.parent)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(text)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temp_name, path)
-    except BaseException:
-        Path(temp_name).unlink(missing_ok=True)
-        raise
 
 
 def validate_registry(
@@ -537,8 +516,3 @@ def registry_fingerprint(records: Iterable[SourceRecord]) -> str:
     for record in sorted(records, key=lambda item: item.doc_id):
         digest.update(f"{record.doc_id}:{record.source_sha256.lower()}\n".encode())
     return digest.hexdigest()
-
-
-def comparable_records(records: Iterable[SourceRecord]) -> list[SourceRecord]:
-    """Вернуть только сопоставимые источники (без БПС-Сбербанка)."""
-    return [record for record in records if record.is_comparable]

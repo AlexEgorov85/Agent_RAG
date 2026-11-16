@@ -56,35 +56,55 @@ def main() -> int:
     base_url = (os.getenv("LLM_BASE_URL") or "").strip()
     chat_model = os.getenv("LLM_MODEL", "GigaChat/GigaChat-3-Pro")
     embed_model = os.getenv("EMBED_MODEL", "ai-sage/Giga-Embeddings-instruct-3B")
+    embed_base = (os.getenv("EMBED_BASE_URL")
+                  or os.getenv("EMBEDDINGS_BASE_URL") or "").strip()
+    embed_key = (os.getenv("EMBED_API_KEY")
+                 or os.getenv("NEURALDEEP_API_KEY") or "").strip()
     print(f"base_url: {base_url or '<empty>'}")
     print(f"key present: {bool(key)} | length: {len(key)}")
     print(f"project UUID from key: {project_id_from_key(key) or '<unknown>'}")
-    if not key or not base_url:
-        print("LLM_API_KEY/LLM_BASE_URL не заданы.")
+    if embed_base or embed_key:
+        print(f"embed_base_url: {embed_base or '<empty>'}")
+        print(f"embed key present: {bool(embed_key)} | length: {len(embed_key)}")
+        if not embed_base or not embed_key:
+            print("EMBED_BASE_URL/EMBED_API_KEY заданы не полностью.")
+            return 2
+    if not (key and base_url) and not (embed_base and embed_key):
+        print("LLM_API_KEY/LLM_BASE_URL (или EMBED_BASE_URL/EMBED_API_KEY) "
+              "не заданы.")
         return 2
 
     from openai import OpenAI
 
-    client = OpenAI(api_key=key, base_url=base_url, timeout=30, max_retries=0)
-    _report(
-        "models.list",
-        lambda: len(client.models.list().data),
+    client = (
+        OpenAI(api_key=key, base_url=base_url, timeout=30, max_retries=0)
+        if key and base_url else None
     )
-    _report(
-        f"chat[{chat_model}]",
-        lambda: (
-            client.chat.completions.create(
-                model=chat_model,
-                messages=[{"role": "user", "content": "ping"}],
-                max_tokens=4,
-            ).choices[0].message.content
-            or ""
-        )[:40],
+    embed_client = (
+        OpenAI(api_key=embed_key, base_url=embed_base, timeout=30, max_retries=0)
+        if embed_base and embed_key else client
     )
+    if client is not None:
+        _report(
+            "models.list",
+            lambda: len(client.models.list().data),
+        )
+        _report(
+            f"chat[{chat_model}]",
+            lambda: (
+                client.chat.completions.create(
+                    model=chat_model,
+                    messages=[{"role": "user", "content": "ping"}],
+                    max_tokens=4,
+                ).choices[0].message.content
+                or ""
+            )[:40],
+        )
     _report(
         f"embeddings[{embed_model}]",
         lambda: len(
-            client.embeddings.create(model=embed_model, input=["ping"]).data[0].embedding
+            embed_client.embeddings.create(
+                model=embed_model, input=["ping"]).data[0].embedding
         ),
     )
     return 0

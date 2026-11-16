@@ -1,7 +1,8 @@
-"""Evaluation / Benchmark API (specs/evaluation-webui.md §8).
+"""Evaluation / Benchmark API (docs/specs/evaluation-webui.md §8).
 
-Adapter только читает артефакты ``eval.runner``: summary/cases/traces. Метрики,
-дельты и диагностика не пересчитываются во frontend, benchmark не выполняется в
+Adapter читает артефакты ``eval.runner``: summary/cases/traces. Frontend не
+пересчитывает метрики; adapter дополнительно считает только дельты сравнения и
+диагностику покрытия по сохранённым данным. Benchmark не выполняется в
 HTTP-запросе — создание запуска ставит задачу в очередь worker'а.
 """
 
@@ -298,6 +299,7 @@ def _page(limit: int, offset: int) -> tuple[int, int]:
 
 @router.get("/evaluation/suites", tags=["evaluation"])
 def list_suites(runtime: RuntimeDep, owner: Owner) -> dict[str, Any]:
+    """Список наборов тестов и доступных retrieval-режимов."""
     dataset = runtime.dataset()
     items: list[dict[str, Any]] = []
     for suite in SUITE_IDS:
@@ -390,6 +392,7 @@ def create_run(
     runtime: RuntimeDep,
     owner: Owner,
 ) -> JSONResponse:
+    """Поставить evaluation-прогон в очередь."""
     existing = None
     if payload.client_request_id:
         existing = runtime.store.find_by_client_request_id(payload.client_request_id)
@@ -505,6 +508,7 @@ def list_runs(
     limit: int = Query(20, ge=1, le=MAX_PAGE),
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
+    """Список прогонов с фильтрами."""
     page_limit, page_offset = _page(limit, offset)
     if status and status not in {*ACTIVE_RUN_STATUSES, *TERMINAL_RUN_STATUSES}:
         raise ApiError(422, "validation_error", "Неизвестный статус запуска.")
@@ -528,6 +532,7 @@ def list_runs(
 
 @router.get("/evaluation/runs/{run_id}", tags=["evaluation"])
 def get_run(run_id: str, runtime: RuntimeDep, owner: Owner) -> dict[str, Any]:
+    """Детали прогона."""
     return _run_payload(runtime, _get_run_or_404(runtime, run_id))
 
 
@@ -566,6 +571,7 @@ def list_run_tests(
     limit: int = Query(50, ge=1, le=MAX_PAGE),
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
+    """Результаты тестов прогона."""
     _get_run_or_404(runtime, run_id)
     page_limit, page_offset = _page(limit, offset)
     passed: bool | None = None
@@ -755,6 +761,7 @@ def get_run_test(
     retrieval_mode: str | None = None,
     attempt_index: int = Query(0, ge=0),
 ) -> dict[str, Any]:
+    """Детали результата одного теста."""
     run = _get_run_or_404(runtime, run_id)
     mode, row = _resolve_result(runtime, run_id, test_id, retrieval_mode, attempt_index)
     trace = _load_trace(runtime, run, row)
@@ -897,6 +904,7 @@ def get_run_test_trace(
     retrieval_mode: str | None = None,
     attempt_index: int = Query(0, ge=0),
 ) -> JSONResponse:
+    """Trace одного результата."""
     run = _get_run_or_404(runtime, run_id)
     mode, row = _resolve_result(runtime, run_id, test_id, retrieval_mode, attempt_index)
     trace = _load_trace(runtime, run, row)
@@ -919,6 +927,7 @@ def get_run_test_trace(
 
 @router.get("/evaluation/runs/{run_id}/report", tags=["evaluation"])
 def get_run_report(run_id: str, runtime: RuntimeDep, owner: Owner) -> Response:
+    """Отчёт прогона."""
     row = _get_run_or_404(runtime, run_id)
     path = _report_path(runtime, row)
     if path is None:
@@ -946,6 +955,7 @@ def get_run_report(run_id: str, runtime: RuntimeDep, owner: Owner) -> Response:
 
 @router.post("/evaluation/runs/{run_id}/cancel", tags=["evaluation"])
 def cancel_run(run_id: str, runtime: RuntimeDep, owner: Owner) -> dict[str, Any]:
+    """Запросить отмену прогона."""
     if not runtime.config.eval_cancel_available():
         raise ApiError(
             409, "cancel_not_supported", "Отмена запусков отключена конфигурацией."
@@ -982,6 +992,7 @@ def list_tests(
     limit: int = Query(50, ge=1, le=MAX_PAGE),
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
+    """Каталог тестов датасета."""
     if retrieval_mode == "all":
         raise ApiError(
             422,
@@ -1078,6 +1089,7 @@ def list_tests(
 
 @router.get("/evaluation/tests/{test_id}", tags=["evaluation"])
 def get_test(test_id: str, runtime: RuntimeDep, owner: Owner) -> dict[str, Any]:
+    """Определение теста по ID."""
     dataset = runtime.dataset()
     test = dataset.test_by_id(test_id) if dataset.available else None
     history = runtime.store.test_history(test_id)
@@ -1174,6 +1186,7 @@ def compare_runs(
     base: str,
     candidate: str,
 ) -> dict[str, Any]:
+    """Сравнить два прогона и вернуть дельты."""
     base_row = _get_run_or_404(runtime, base)
     candidate_row = _get_run_or_404(runtime, candidate)
     base_summary = _summary(base_row)

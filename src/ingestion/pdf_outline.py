@@ -13,12 +13,12 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Sequence
+
+from src.core.io import atomic_write_json
 
 from src.ingestion.structure_builder import (
     is_junk_title,
@@ -162,25 +162,11 @@ def outline_level_map(entries: Sequence[OutlineEntry]) -> Dict[str, int]:
     return mapping
 
 
-def _atomic_write_json(target: Path, payload: Any) -> None:
-    """Атомарно записать JSON (как в парсере: tempfile + ``os.replace``)."""
-    target.parent.mkdir(parents=True, exist_ok=True)
-    handle = tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", suffix=".json",
-        dir=target.parent, delete=False)
-    try:
-        json.dump(payload, handle, ensure_ascii=False, indent=1)
-        handle.flush()
-    finally:
-        handle.close()
-    os.replace(handle.name, target)
-
-
 def save_outline(entries: Sequence[OutlineEntry], doc_id: str,
                  structure_dir: Path) -> Path:
     """Сохранить ``{doc_id}_outline.json`` в каталог структуры."""
     target = Path(structure_dir) / f"{doc_id}_outline.json"
-    _atomic_write_json(target, [entry.to_dict() for entry in entries])
+    atomic_write_json(target, [entry.to_dict() for entry in entries], indent=1)
     return target
 
 
@@ -188,7 +174,7 @@ def save_links(links: Sequence[Dict[str, int]], doc_id: str,
                structure_dir: Path) -> Path:
     """Сохранить ``{doc_id}_links.json`` в каталог структуры."""
     target = Path(structure_dir) / f"{doc_id}_links.json"
-    _atomic_write_json(target, list(links))
+    atomic_write_json(target, list(links), indent=1)
     return target
 
 

@@ -147,6 +147,7 @@ class LLMRouter:
         *,
         history: Sequence[Mapping[str, Any]] | None = None,
     ) -> QueryPlan:
+        """Построить план: детерминированный fallback, затем LLM-уточнение."""
         base = self.fallback.analyze(question, filters)
         try:
             payload = self._call(question, filters, history)
@@ -202,7 +203,7 @@ class LLMRouter:
     def _in_window(self, year: int) -> bool:
         if self.min_year is None or self.max_year is None:
             return 1800 <= year <= 2199
-        return self.min_year - 1 <= year <= self.max_year + 1
+        return self.min_year <= year <= self.max_year
 
     def _valid_years(self, value: Any) -> list[int]:
         return sorted({year for year in _int_list(value) if self._in_window(year)})
@@ -319,6 +320,11 @@ class LLMRouter:
                 continue
             if metric in question_metrics or metric in base.required_metrics:
                 metrics.append(metric)
+        if not metrics:
+            # LLM-план не назвал метрики: берём те, что прямо упомянуты в
+            # вопросе. Иначе coverage и справочник значений остаются пустыми,
+            # и ответ уходит в abstain «нет данных».
+            metrics = sorted(question_metrics)[:5]
         metrics = metrics[:5]
 
         requires_comparison = bool(

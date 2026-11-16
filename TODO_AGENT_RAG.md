@@ -4,7 +4,7 @@
 и React WebUI этапов 1–4 работают, Evaluation API и React-раздел Evaluation
 реализованы (2026-11-15). Архитектура не меняется: один LangGraph-агент,
 `AgentService`, существующие инструменты и retrieval. Полный `pytest` —
-`854 passed` (Python 3.11.9, снимок 15.11.2026), frontend - `160 passed` в 24
+`863 passed` (Python 3.11.9, снимок 15.11.2026), frontend - `160 passed` в 24
 файле, Playwright E2E — `7/7`, реальная приёмка dev — `4/4`. Benchmark: датасет
 30 тестов (10/10/5/5) + 6 holdout, реальный smoke `12/12`; последний полный
 real run — `23/30` (pass_rate 0.767, Recall@5 0.889), предыдущий — `24/30`
@@ -108,7 +108,7 @@ P2 — после базового контура, P3 — полировка.
   `12/12`. Предыдущий full-прогон — `24/30` (`174124`), поэтому per-test
   стабильность не доказана (`repeat=1`). Итог ниже цели: 7 падений, holdout
   даёт 4/6. В прогоне есть warning `holdout_gold_overlap` (4 теста).
-  **Оговорка:** прогон выполнен на dev-корпусе из 1025 чанков, не на 9 PDF.
+  **Оговорка:** прогон выполнен на dev-корпусе из 1025 чанков, не на 10 PDF.
 - [x] **E2.** `eval/trace.py`: единый `AgentRunResult.diagnostics`.
 - [x] **E3.** `eval/metrics.py`: retrieval + behavior + temporal/structure/calculation.
 - [x] **E4.** `eval/runner.py` + CLI, `summary.capabilities`, JSON/CSV.
@@ -153,22 +153,19 @@ P2 — после базового контура, P3 — полировка.
 
 ## 7. Полный корпус (P0 для демонстрации)
 
-> Не закрыто: полный корпус из 9 PDF не собран. `data/elements` готовы для
-> 2015–2018; `data/structure` и `data/chunks` собраны для 2015–2018 (3928
-> чанков, 98% со структурой). Документы 2019, 2020, 2022, 2023, 2024 не
-> парсились; `data/graph` содержит dev-граф, полный graph index не построен
-> (≈982 LLM-пакета). Реестр источников и скрипты сборки
-> (`scripts/build_corpus.py`, `scripts/verify_corpus.py`) готовы; продолжение —
-> парсинг оставшихся PDF и повторная сборка производных.
+> Корпус спарсен: `data/elements`, `data/structure`, `data/chunks` есть для
+> всех 10 документов (13969 чанка, 98.4% со структурой, 1650 таблиц, 0 пустых),
+> `verify_corpus.py` — 0 ошибок. Не закрыто: embeddings/FAISS для новых 10041
+> чанков, полный graph index и benchmark на полном корпусе (нужен Cloud.ru API).
 >
 > Dev-приёмка 4 сценариев (factoid, temporal, structural, abstain) проходит
 > `4/4` на dev-корпусе, но это не заменяет D5 на полном корпусе.
 
-- [ ] **D1.** 9 PDF, реестр источников, issuer 2015, отсутствие 2021.
-- [ ] **D2.** Пересобрать elements/structure/chunks/embeddings для 2019–2024 и
-  свести с уже готовыми 2015–2018.
+- [x] **D1.** 10 PDF, реестр источников, issuer 2015, отсутствие 2021.
+- [~] **D2.** elements/structure/chunks для 2019–2024 пересобраны и сведены;
+  embeddings/FAISS для новых 10041 чанков ещё нет.
 - [ ] **D3.** Пересобрать graph index и provenance.
-- [ ] **D4.** Corpus validation на полном наборе (`verify_corpus.py` без ошибок).
+- [x] **D4.** Corpus validation на полном наборе: 10/10, 0 ошибок, 4 warning.
 - [ ] **D5.** 4 обязательных сценария на полном корпусе: factoid, temporal,
   structural, abstain.
 - [ ] **D6.** `expected_corpus_sha256` для benchmark (сейчас зафиксирован хэш
@@ -202,7 +199,7 @@ P2 — после базового контура, P3 — полировка.
 - [ ] **I3.** Cost/latency: кэш rewrites, лимит LLM-проверок — не реализованы;
   есть только лимит вариантов перефраза и `max_structure_docs`.
 - [x] **I4.** README приведён к фактическому состоянию.
-- [x] **I5.** Полный прогон тестов в Python 3.11: `854 passed` в `.venv`
+- [x] **I5.** Полный прогон тестов в Python 3.11: `863 passed` в `.venv`
   (Python 3.11.9), `160 passed` в 24 файлах frontend, Playwright E2E `7/7`,
   `tsc -b` без ошибок; `vite build` успешен, vendor-split убрал warning >500 kB.
 
@@ -306,7 +303,7 @@ P2 — конфигурируемость/качество, P3 — докуме�
   (`pass_rate 0.767`, Recall@5 0.889, Recall@10 0.926, MRR 0.889; dev 19/24,
   holdout 4/6). README обновлён этим результатом. Реальная dev-приёмка после
   P1/P2 ещё не перепрогонялась: последний снимок `4/4` от 02:44. Прогон на
-  полном корпусе 9 PDF по-прежнему требует готового корпуса.
+  полном корпусе 10 PDF по-прежнему требует готового корпуса.
 - [x] **F4.** Инженерные исправления без API: `import sys` в `pdf_parser.py`,
   autouse-изоляция `LLM_LOCK_PATH` в `tests/conftest.py`, `pytest-timeout`,
   JSONL-чекпоинт graph-извлечения (`--checkpoint`/resume), TTL-retry

@@ -8,6 +8,8 @@ import uuid
 from collections.abc import Mapping
 from typing import Any
 
+from src.core.record import field_value
+
 try:
     from .citations import render_citations
 except ImportError:  # Streamlit может исполнять этот файл напрямую.
@@ -172,9 +174,7 @@ def build_service_filters(ui_filters: dict[str, Any], filters_factory: Any = Non
 
 
 def _get(value: Any, key: str, default: Any = None) -> Any:
-    if isinstance(value, Mapping):
-        return value.get(key, default)
-    return getattr(value, key, default)
+    return field_value(value, key, default)
 
 
 _MISSING = object()
@@ -429,9 +429,10 @@ def coverage_report_style(status: Any) -> dict[str, Any] | None:
 def coverage_view(coverage: Any) -> dict[str, Any] | None:
     """Нормализует ``diagnostics["coverage"]`` в строки metric × year.
 
-    UI не вычисляет покрытие: берётся матрица ``metrics``, а при её отсутствии —
-    плоский список ``cells``. Неизвестная ячейка остаётся «нет данных», а не
-    превращается в ``not_found`` или ноль.
+    UI не вычисляет покрытие. Матрица ``metrics`` задаёт статусы ячеек, а
+    плоский список ``cells`` используется для порядка метрик/лет, подписей,
+    ``chunk_id`` и как fallback-статус, если в матрице ячейки нет. Неизвестная
+    ячейка остаётся «нет данных», а не превращается в ``not_found`` или ноль.
     """
     if not isinstance(coverage, Mapping) or not coverage:
         return None

@@ -33,6 +33,7 @@ class DocumentNode:
 
     @property
     def node_id(self) -> str:
+        """ID узла документа."""
         return f"doc:{self.doc_id}"
 
 
@@ -50,6 +51,7 @@ class SectionGraphNode:
 
     @property
     def node_id(self) -> str:
+        """ID узла раздела."""
         return f"section:{self.doc_id}:{self.stable_section_id}"
 
 
@@ -69,6 +71,7 @@ class ChunkNode:
 
     @property
     def node_id(self) -> str:
+        """ID узла чанка."""
         return f"chunk:{self.chunk_id}"
 
 
@@ -150,14 +153,19 @@ class GraphView:
     edges: list[dict[str, Any]]
 
     def to_dict(self) -> dict[str, Any]:
+        """JSON-представление подграфа."""
         return {"nodes": self.nodes, "edges": self.edges}
+
+
+def normalize_entity_name(name: str) -> str:
+    """Схлопывает пробелы и приводит имя к нижнему регистру для стабильной идентичности."""
+    return " ".join(str(name).split()).casefold()
 
 
 def entity_node_id(name: str, entity_type: str = "Other") -> str:
     """Создаёт детерминированный ID сущности из типа и нормализованного имени."""
     canonical_type = entity_type if entity_type in ENTITY_TYPES else "Other"
-    normalized_name = " ".join(name.split()).casefold()
-    return f"entity:{canonical_type}:{normalized_name}"
+    return f"entity:{canonical_type}:{normalize_entity_name(name)}"
 
 
 def _json_value(value: Any) -> Any:

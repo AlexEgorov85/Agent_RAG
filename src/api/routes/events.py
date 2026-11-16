@@ -162,6 +162,7 @@ def get_request_state(
     owner: Owner,
     store: Store = Depends(get_store),
 ) -> RequestState:
+    """Текущий статус запроса."""
     row = store.get_request(owner, request_id)
     if row is None:
         raise request_not_found(request_id)
@@ -190,6 +191,7 @@ async def stream_events(
     store: Store = Depends(get_store),
     hub: EventHub = Depends(get_hub),
 ) -> StreamingResponse:
+    """SSE-поток событий запроса с replay."""
     row = store.get_request(owner, request_id)
     if row is None:
         # Не раскрываем существование чужого/просроченного запроса.
@@ -236,6 +238,7 @@ def cancel_request(
     services: Services = Depends(get_services),
     hub: EventHub = Depends(get_hub),
 ) -> CancelResponse:
+    """Отменить активный запрос."""
     row = store.get_request(owner, request_id)
     if row is None:
         raise request_not_found(request_id)

@@ -1,6 +1,6 @@
 """Обогащение чанков структурой документа (опциональные поля контракта К2).
 
-Слой ``С`` из spec_project.md §5.2: базовые курсовые поля чанка не меняются,
+Слой ``С`` из spec_project.md §5.2: базовые поля чанка не меняются,
 добавляются только ``section_path``/``breadcrumbs``/``section_level``/
 ``parent_section``. Если для страницы чанка раздел не найден (обложка, TOC до
 первого заголовка), поля не добавляются — фильтры трактуют их как «нет данных».
@@ -11,12 +11,7 @@ from __future__ import annotations
 from bisect import bisect_right
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-from src.ingestion.structure_builder import DocumentStructure, SectionNode
-
-
-def _section_path(breadcrumbs: Sequence[str]) -> str:
-    """Склеить breadcrumbs в путь раздела через ``/``."""
-    return "/".join(breadcrumbs)
+from src.ingestion.structure_builder import DocumentStructure, SectionNode, section_path
 
 
 def find_section_for_page(structure: DocumentStructure,
@@ -57,11 +52,11 @@ def enrich_chunk(chunk: Mapping[str, Any],
     section = find_section_for_page(structure, int(chunk["page_pdf"]))
     if section is None:
         return enriched
-    enriched["section_path"] = _section_path(section.breadcrumbs)
+    enriched["section_path"] = section_path(section.breadcrumbs)
     enriched["breadcrumbs"] = list(section.breadcrumbs)
     enriched["section_level"] = section.level
     enriched["parent_section"] = (
-        _section_path(section.breadcrumbs[:-1])
+        section_path(section.breadcrumbs[:-1])
         if len(section.breadcrumbs) > 1 else None)
     return enriched
 

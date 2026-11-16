@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
+from src.core.introspection import supports_keyword
+from src.core.record import field_value as _field
 from src.retrieval.hybrid_retriever import SearchFilters
 
 #: Предупреждение, которое возвращается вместе с обычным результатом, если
@@ -24,49 +25,40 @@ _EXPLICIT_MODES = frozenset({"dense", "keyword"})
 MAX_SEARCH_TOP_K = 10
 
 
-def _supports_keyword(target: Any, keyword: str) -> bool:
-    try:
-        parameters = inspect.signature(target).parameters.values()
-    except (TypeError, ValueError):
-        return False
-    return any(
-        item.kind == inspect.Parameter.VAR_KEYWORD
-        or (
-            item.name == keyword
-            and item.kind != inspect.Parameter.POSITIONAL_ONLY
-        )
-        for item in parameters
-    )
-
-
 class ToolUnavailable(RuntimeError):
     """Поддерживаемый необязательный инструмент не настроен или его индекс недоступен."""
 
 
 class SearchBackend(Protocol):
-    def retrieve(self, query: str, *, filters: SearchFilters) -> Any: ...
+    """Протокол поискового backend'а."""
+    def retrieve(self, query: str, *, filters: SearchFilters) -> Any:
+        """Выполнить поиск по запросу и фильтрам."""
+        ...
 
 
 class StructureBackend(Protocol):
+    """Протокол чтения дерева разделов."""
     def get_structure_tree(
         self, doc_id: str, *, section_path: str | None, max_depth: int
-    ) -> Any: ...
+    ) -> Any:
+        """Вернуть разделы документа."""
+        ...
 
 
 class EntityBackend(Protocol):
+    """Протокол поиска по графу сущностей."""
     def get_entities(
         self, entity_names: Sequence[str], *, filters: SearchFilters, max_hops: int
-    ) -> Any: ...
+    ) -> Any:
+        """Вернуть чанки, связанные с сущностями."""
+        ...
 
 
 class ChunkBackend(Protocol):
-    def get_chunk(self, chunk_id: str) -> Any: ...
-
-
-def _field(value: Any, name: str, default: Any = None) -> Any:
-    if isinstance(value, Mapping):
-        return value.get(name, default)
-    return getattr(value, name, default)
+    """Протокол чтения одного чанка."""
+    def get_chunk(self, chunk_id: str) -> Any:
+        """Вернуть чанк по ID."""
+        ...
 
 
 def _valid_filters(value: Any) -> SearchFilters:
@@ -148,37 +140,38 @@ class AgentTools:
         """
         retrieve = getattr(backend, "retrieve", None)
         target = retrieve if callable(retrieve) else backend
-        if mode in _EXPLICIT_MODES and not _supports_keyword(
+        if mode in _EXPLICIT_MODES and not supports_keyword(
             target, "retrieval_mode"
         ):
             raise ValueError(BACKEND_MODE_ERROR)
         if callable(retrieve):
             kwargs: dict[str, Any] = {"filters": filters}
-            if _supports_keyword(retrieve, "top_k"):
+            if supports_keyword(retrieve, "top_k"):
                 kwargs["top_k"] = top_k
-            if _supports_keyword(retrieve, "retrieval_mode"):
+            if supports_keyword(retrieve, "retrieval_mode"):
                 kwargs["retrieval_mode"] = mode
-            if queries and _supports_keyword(retrieve, "queries"):
+            if queries and supports_keyword(retrieve, "queries"):
                 kwargs["queries"] = queries
-            if rerank_per_year is not None and _supports_keyword(
+            if rerank_per_year is not None and supports_keyword(
                 retrieve, "rerank_per_year"
             ):
                 kwargs["rerank_per_year"] = rerank_per_year
             return retrieve(query, **kwargs)
         kwargs = {}
-        if _supports_keyword(backend, "top_k"):
+        if supports_keyword(backend, "top_k"):
             kwargs["top_k"] = top_k
-        if _supports_keyword(backend, "retrieval_mode"):
+        if supports_keyword(backend, "retrieval_mode"):
             kwargs["retrieval_mode"] = mode
-        if queries and _supports_keyword(backend, "queries"):
+        if queries and supports_keyword(backend, "queries"):
             kwargs["queries"] = queries
-        if rerank_per_year is not None and _supports_keyword(
+        if rerank_per_year is not None and supports_keyword(
             backend, "rerank_per_year"
         ):
             kwargs["rerank_per_year"] = rerank_per_year
         return backend(query, filters=filters, **kwargs)
 
     def invoke(self, name: str, arguments: Mapping[str, Any]) -> Any:
+        """Проверить аргументы и вызвать инструмент из белого списка."""
         if name not in self.ALLOWLIST:
             raise ValueError("unknown_tool")
         args = dict(arguments)
@@ -293,11 +286,13 @@ def result_hits(result: Any) -> list[Any]:
 
 
 def chunk_from_hit(hit: Any) -> tuple[str | None, Any | None]:
+    """Привести хит к паре ``(chunk_id, чанк-словарь)``."""
     chunk = _field(hit, "chunk", hit)
     chunk_id = _field(hit, "chunk_id", _field(chunk, "chunk_id"))
     return (chunk_id if isinstance(chunk_id, str) and chunk_id else None, chunk)
 
 
 def result_warnings(result: Any) -> list[str]:
+    """Извлечь безопасные предупреждения из результата инструмента."""
     warnings = _field(result, "warnings", [])
     return [str(item) for item in warnings] if isinstance(warnings, (list, tuple)) else []

@@ -51,6 +51,7 @@ def get_evidence(
     config: ApiConfig = Depends(get_config),
     services: Services = Depends(get_services),
 ) -> EvidenceDetail:
+    """Вернуть чанк-источник по ID."""
     chunk = services.chunk_metadata(chunk_id)
     if chunk is None:
         raise not_found("Источник не найден.")

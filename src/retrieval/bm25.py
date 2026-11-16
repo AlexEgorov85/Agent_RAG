@@ -14,6 +14,8 @@ from typing import Any
 
 from rank_bm25 import BM25Okapi
 
+from src.core.record import nested_field_value as _field
+
 Chunk = Mapping[str, Any]
 Eligibility = Callable[[Chunk], bool] | Iterable[str | int] | None
 
@@ -64,16 +66,6 @@ def tokenize(text: str) -> list[str]:
 def lemmatize(text: str) -> list[str]:
     """Возвращает ту же нормализованную последовательность токенов, что ``tokenize``."""
     return tokenize(text)
-
-
-def _field(chunk: Chunk, name: str) -> Any:
-    """Читает поле из чанка, затем из его необязательного ``metadata``."""
-    if name in chunk:
-        return chunk[name]
-    metadata = chunk.get("metadata")
-    if isinstance(metadata, Mapping):
-        return metadata.get(name)
-    return None
 
 
 class BM25Index:
